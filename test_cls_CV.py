@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 
-from dataset.crossView_UCLA import np, torch
-from modelZoo.BinaryCoding import gridRing
+from dataset.crossView_UCLA import np, torch, NUCLA_CrossView
+from modelZoo.BinaryCoding import gridRing, twoStreamClassification, contrastiveNet
 from utils import gridRing
 
 def testing(dataloader,net, gpu_id, sampling, mode, withMask, gumbel_thresh, keep_index):
