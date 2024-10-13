@@ -141,7 +141,8 @@ class binarizeSparseCode(nn.Module):
         # binaryCode = self.binaryCoding(sparseCode)
 
         # reconstruction = torch.matmul(Dict, sparseCode)
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, force_hard=True, temperature=0.1, inference=self.Inference)
+        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+                                       force_hard=True, inference=self.Inference)
 
         temp = sparseCode*binaryCode
         reconstruction = torch.matmul(Dict, temp)
@@ -150,7 +151,8 @@ class binarizeSparseCode(nn.Module):
     
     def prediction(self,x,FRA,PRE, bi_thresh):
         pred, sparseCode, dict= self.sparseCoding.prediction(x, FRA, PRE)
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, force_hard=True, temperature=0.1, inference=self.Inference)
+        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+                                       force_hard=True, inference=self.Inference)
         pred = torch.matmul(dict, binaryCode*sparseCode)
 
         return binaryCode, pred
@@ -381,10 +383,11 @@ class classificationWBinarizationRGBDY(nn.Module):
     
 
 class Fullclassification(nn.Module):
-    def __init__(self, num_class, Npole, Drr, Dtheta,
+    def __init__(self, num_class,
+                 Npole, Drr, Dtheta,
                  dim, dataType, Inference, gpu_id, 
-                 fistaLam, group, group_reg,
-                 useCL):
+                 fistaLam, useCL,
+                 group, group_reg):
         super(Fullclassification, self).__init__()
         self.num_class = num_class
         self.Npole = Npole
@@ -417,7 +420,7 @@ class Fullclassification(nn.Module):
         self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
         self.Classifier = classificationGlobal(num_class=self.num_class, Npole=self.Npole, dataType=self.dataType, useCL=self.useCL)
 
-    def forward(self, x,bi_thresh):
+    def forward(self, x, bi_thresh):
         # sparseCode, Dict, R = self.sparseCoding.forward2(x, T) # w.o. RH
         # bz, dims = x.shape[0], x.shape[-1]
         T = x.shape[1]

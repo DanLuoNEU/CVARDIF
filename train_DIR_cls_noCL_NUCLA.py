@@ -10,7 +10,7 @@ from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 
 from dataset.crossView_UCLA import np, random, NUCLA_CrossView
-from modelZoo.BinaryCoding import nn, gridRing, classificationWSparseCode
+from modelZoo.BinaryCoding import Fullclassification, nn, gridRing, classificationWSparseCode
 from modelZoo.BinaryCoding import classificationWBinarizationRGB, classificationWBinarizationRGBDY
 from modelZoo.BinaryCoding import contrastiveNet
 from test_cls_CV import testing, getPlots
@@ -111,27 +111,48 @@ def main(args):
     # 'change to your own model path'
 
     '============================================= Main Body of script================================================='
-
     P,Pall = gridRing(args.N)
     Drr = abs(P)
     Drr = torch.from_numpy(Drr).float()
     Dtheta = np.angle(P)
     Dtheta = torch.from_numpy(Dtheta).float()
-
-
+    # Dataset
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/' # './data/CV/' + args.setup + '/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
     trainSet = NUCLA_CrossView(root_list=path_list, dataType=args.dataType,
                                sampling=args.sampling,  T=args.T, maskType=args.maskType,
                                setup=args.setup, phase='train', nClip=4)
-    trainloader = DataLoader(trainSet, shuffle=True, batch_size=args.bs, num_workers=args.nw)
-
+    trainloader = DataLoader(trainSet, shuffle=True,
+                             batch_size=args.bs, num_workers=args.nw)
     testSet = NUCLA_CrossView(root_list=path_list, dataType=args.dataType,
                               sampling=args.sampling, T=args.T, maskType=args.maskType, 
                               setup=args.setup, phase='test', nClip=4)
-    testloader = DataLoader(testSet, shuffle=True, batch_size=args.bs, num_workers=args.nw)
+    testloader = DataLoader(testSet, shuffle=True,
+                            batch_size=args.bs, num_workers=args.nw)
 
-    if args.mode == 'dy+cl':
+    if args.mode == 'dy+bi+cl':
+        # rhDYAN+bi+cl
+        pretrain = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/rhDYAN_bi/100.pth'
+        print('pretrain:', pretrain)
+        stateDict = torch.load(pretrain, map_location=args.map_loc)['state_dict']
+        Drr = stateDict['sparseCoding.rr']
+        Dtheta = stateDict['sparseCoding.theta']
+    
+        net = Fullclassification(num_class=args.num_class,
+                                Npole=args.N+1,
+                                Drr=Drr, Dtheta=Dtheta,
+                                dim=2, dataType=args.dataType,
+                                Inference=True,
+                                fistaLam=args.lam_f,
+                                gpu_id=args.gpu_id,
+                                useCL=False,
+                                group=False, group_reg=0).cuda(args.gpu_id)
+        # Freeze the Dictionary part
+        net.sparseCoding.rr.requires_grad = False
+        net.sparseCoding.theta.requires_grad = False
+        optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()),
+                                    lr=args.lr, weight_decay=0.001, momentum=0.9)
+    elif args.mode == 'dy+cl':
         # NOTE: this mode is only for regular DYAN so far
         # pretrain = './pretrained/NUCLA/' + setup + '/' + sampling + '/pretrainedDyan.pth'
         # pretrain = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/regularDYAN_seed123/60.pth'
@@ -219,22 +240,19 @@ def main(args):
         net = load_pretrainedModel_endtoEnd(stateDict, net)
         # print('check')
 
-    # 
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 70], gamma=0.1)
     Criterion = torch.nn.CrossEntropyLoss()
     mseLoss = torch.nn.MSELoss()
     L1loss = torch.nn.SmoothL1Loss()
-    cosSIM = nn.CosineSimilarity(dim=1, eps=1e-6)
 
     LOSS = []
     ACC = []
     LOSS_CLS = []
     LOSS_MSE = []
     LOSS_BI = []
-    print('Experiment config(setup, clip, lam1, lam2, lr, lr_2, groupLasso):',
-          args.setup, args.sampling, 
-          args.Alpha, args.lam1, args.lam2,
-          args.lr, args.lr_2, args.groupLasso)
+    print('Experiment config:\nsetup:',args.setup,'clip:', args.sampling,
+          'Alpha:',args.Alpha,'lam1:',args.lam1,'lam2:',args.lam2,
+          'lr:',args.lr,'lr_2:',args.lr_2)
     for epoch in range(1, args.Epoch+1):
         print('start training epoch:', epoch)
         lossVal = []
@@ -243,8 +261,6 @@ def main(args):
         lossMSE = []
         start_time = time.time()
         for i, sample in enumerate(trainloader):
-            
-            # print('sample:', i)
             optimizer.zero_grad()
 
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
@@ -277,7 +293,20 @@ def main(args):
                 input_mask = torch.ones(1).cuda(args.gpu_id)
                 # gt_skeletons = input_skeletons
 
-            if args.mode == 'dy+cl':
+            if args.mode == 'dy+bi+cl':
+                # NOTE: dy+bi+cl
+                keep_index = None
+                actPred, lastFeat, binaryCode, output_skeletons  = net(input_skeletons, t, args.gumbel_thresh) #bi_thresh=gumbel threshold
+                # actPred, output_skeletons,_ = net.forward2(input_skeletons, t, keep_index)
+                actPred = actPred.reshape(skeletons.shape[0], nClip, args.num_class)
+                actPred = torch.mean(actPred, 1)
+                
+                # loss = lam1 * Criterion(actPred, gt_label) + lam2 * mseLoss(output_skeletons, input_skeletons)
+                loss = Criterion(actPred, gt_label)
+                bi_gt = torch.zeros_like(binaryCode).cuda(args.gpu_id)
+                lossMSE.append(mseLoss(output_skeletons, input_skeletons).data.item())
+                lossBi.append(L1loss(binaryCode, bi_gt).data.item())
+            elif args.mode == 'dy+cl':
                 # NOTE: dy+cl
                 keep_index = None
                 actPred, output_skeletons, lastFeat = net(input_skeletons, t) #bi_thresh=gumbel threshold
@@ -356,7 +385,8 @@ def main(args):
         
         if epoch % 1 == 0:
 
-            Acc = testing(testloader, net, args.gpu_id, args.sampling,
+            Acc = testing(testloader, net,
+                          args.gpu_id, args.sampling,
                           args.mode, args.withMask,
                           args.gumbel_thresh,
                           keep_index)

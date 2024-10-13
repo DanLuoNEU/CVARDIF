@@ -78,20 +78,18 @@ def main(args):
     net.cuda(args.gpu_id)
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
-
     trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
                                dataType='2D',  T=args.T, setup=args.setup,
                                sampling=args.sampling, maskType='score',
-                               nClip=4)
-    trainloader = DataLoader(trainSet, batch_size=args.bs, num_workers=args.nw,
-                             shuffle=True)
-
+                               nClip=10)
+    trainloader = DataLoader(trainSet, shuffle=True,
+                             batch_size=args.bs, num_workers=args.nw)
     testSet = NUCLA_CrossView(root_list=path_list, phase='test',
                               dataType='2D', T=args.T, setup=args.setup,
                               sampling=args.sampling, maskType='score',
-                              nClip=4)
-    testloader = DataLoader(testSet, batch_size=args.bs, num_workers=args.nw,
-                            shuffle=True)
+                              nClip=10)
+    testloader = DataLoader(testSet, shuffle=True,
+                            batch_size=args.bs, num_workers=args.nw)
     # Training Strategy
     optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), 
                                 lr=args.lr, weight_decay=0.001, momentum=0.9)
@@ -112,8 +110,8 @@ def main(args):
             # print('sample:', i)
             optimizer.zero_grad()
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
-            t = skeletons.shape[1]
-            input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1)
+            t = skeletons.shape[1] # (batch_size x num_clips) x t x dim_joint? x num_joint?
+            input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1) # (batch_size x num_clips) x t x (dim_joint x num_joint)
             # images = sample['input_images'].float().cuda(args.gpu_id)
             # ROIs = sample['input_rois'].float().cuda(args.gpu_id)
             # ### regular dyan

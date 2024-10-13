@@ -6,7 +6,10 @@ from dataset.crossView_UCLA import np, torch, NUCLA_CrossView
 from modelZoo.BinaryCoding import gridRing, twoStreamClassification, contrastiveNet
 from utils import gridRing
 
-def testing(dataloader,net, gpu_id, sampling, mode, withMask, gumbel_thresh, keep_index):
+def testing(dataloader, net,
+            gpu_id, sampling, mode, 
+            withMask, gumbel_thresh,
+            keep_index):
     count = 0
     pred_cnt = 0
 
