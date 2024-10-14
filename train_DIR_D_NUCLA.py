@@ -39,8 +39,9 @@ def get_parser():
     parser.add_argument('--sampling', default='Single', help='')
 
     parser.add_argument('--T', default=36, type=int, help='')
-    parser.add_argument('--lam_f', default=0.1, type=float)
     parser.add_argument('--N', default=80*2, type=int, help='')
+    parser.add_argument('--lam_f', default=0.1, type=float)
+    parser.add_argument('--gumbel_thresh', default=0.1, type=float)
 
     parser.add_argument('--gpu_id', default=7, type=int, help='')
     parser.add_argument('--bs', default=2, type=int, help='')
@@ -70,11 +71,6 @@ def main(args):
     net = binarizeSparseCode(num_binary=128, Drr=Drr, Dtheta=Dtheta,
                              gpu_id=args.gpu_id, Inference=False, 
                              fistaLam=args.lam_f)
-
-    # net = classificationWBinarizationRGB(num_class=10, dataType='rgb',
-    #                                      T=args.T, Npole=args.N+1,
-    #                                      Drr=Drr, Dtheta=Dtheta,
-    #                                      gpu_id=args.gpu_id)
     net.cuda(args.gpu_id)
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
@@ -112,16 +108,6 @@ def main(args):
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
             t = skeletons.shape[1] # (batch_size x num_clips) x t x dim_joint? x num_joint?
             input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1) # (batch_size x num_clips) x t x (dim_joint x num_joint)
-            # images = sample['input_images'].float().cuda(args.gpu_id)
-            # ROIs = sample['input_rois'].float().cuda(args.gpu_id)
-            # ### regular dyan
-            # sparseCode,_,output_skeletons = net.forward2(input_skeletons, t)
-            # ### regular dyan for prediction
-            # output_skeletons = net.prediction(input_skeletons[:,0:t-1], t-1)
-            # loss = 0.02*mseLoss(output_skeletons[:,0:t-1], input_skeletons[:,0:t-1]) + 1*mseLoss(output_skeletons[:,-1], input_skeletons[:,-1])
-            # loss = mseLoss(output_skeletons, input_skeletons)
-            # + 1e-4*l1Loss(sparseCode,target_coeff)
-            # ipdb.set_trace()
             ### rh-dyan + bi
             binaryCode, output_skeletons, _ = net(input_skeletons, t, 0.5)
             target_coeff = torch.zeros_like(binaryCode).cuda(args.gpu_id)
@@ -133,18 +119,6 @@ def main(args):
             lossMSE.append(mseLoss(output_skeletons, input_skeletons).data.item())
             lossL1.append(0.5*l1Loss(binaryCode,target_coeff).data.item())
             lossVal.append(loss.data.item())
-
-            ### rh-dyan + bi, RGB
-            # bz, seqLen, c,x,y = images.shape
-            # _, binaryCode, output_feat,input_feat = net(images.reshape(bz*seqLen,c, x, y), ROIs.reshape(bz*seqLen, c, x, y))
-            # target_coeff = torch.zeros_like(binaryCode).cuda(args.gpu_id)
-            # loss = mseLoss(output_feat, input_feat) + 0.1*l1Loss(binaryCode, target_coeff)
-            # loss.backward()
-            # optimizer.step()
-            # ipdb.set_trace()
-            # lossMSE.append(mseLoss(output_feat, input_feat).data.item())
-            # lossL1.append(0.5*l1Loss(binaryCode,target_coeff).data.item())
-            # lossVal.append(loss.data.item())
         end_time = time.time()
         # print('epoch:', epoch, 'loss:', np.mean(np.asarray(lossVal)), 'time(h):', (end_time - start_time) / 3600)
         print('epoch:', epoch, 'mse loss:', np.mean(np.asarray(lossMSE)), 'L1 loss:', np.mean(np.asarray(lossL1)),
@@ -157,10 +131,7 @@ def main(args):
                 ERROR = torch.zeros(testSet.__len__(), 1)
 
                 for i, sample in enumerate(testloader):
-                    
                     skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
-                    # images = sample['input_images'].float().cuda(args.gpu_id)
-                    # ROIs = sample['input_rois'].float().cuda(args.gpu_id)
                     t = skeletons.shape[1]
                     input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1)
                     # 'regular dyan'
@@ -170,15 +141,6 @@ def main(args):
                     # 'rhDyan+Bi'
                     _, output_skeletons,_ = net(input_skeletons, t, 0.5)
                     error = torch.norm(output_skeletons - input_skeletons).cpu()
-
-                    # 'rhDyan + bi+ rgb'
-                    # bz, seqLen, c,x,y = images.shape
-                    # _, binaryCode, output_feat,input_feat = net(images.reshape(bz*seqLen, c, x, y), ROIs.reshape(bz*seqLen,c, x, y))
-                    # _, output_skeletons = net.prediction(input_skeletons[:,0:FRA], FRA, PRE, 0.5)
-                    # ipdb.set_trace()
-                    
-                    # error = torch.norm(output_feat - input_feat).cpu()
-                    # error = torch.norm(output_skeletons[:,FRA:] - input_skeletons[:,FRA:]).cpu()
                     ERROR[i] = error
 
                 print('epoch:', epoch, 'error:', torch.mean(ERROR))

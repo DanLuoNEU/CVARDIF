@@ -322,6 +322,28 @@ class NUCLA_CrossView(Dataset):
 
         return augImageSeqPair
 
+    def paddingSeq_ske(self, skeleton, normSkeleton, visibility, affineSkeleton):
+        Tadd = abs(skeleton.shape[0] - self.T)
+
+        last = np.expand_dims(skeleton[-1, :, :], 0)
+        copyLast = np.repeat(last, Tadd, 0)
+        skeleton_New = np.concatenate((skeleton, copyLast), 0)  # copy last frame Tadd time
+
+        lastNorm = np.expand_dims(normSkeleton[-1, :, :], 0)
+        copyLastNorm = np.repeat(lastNorm, Tadd, 0)
+        normSkeleton_New = np.concatenate((normSkeleton, copyLastNorm), 0)
+
+        lastAffine = np.expand_dims(affineSkeleton[:,-1,:,:], 1)
+        copyLastAff = np.repeat(lastAffine, Tadd, 1)
+        affineSkeleton_new = np.concatenate((affineSkeleton, copyLastAff),1)
+
+        lastMask = np.expand_dims(visibility[-1,:,:], 0)
+        copyLastMask = np.repeat(lastMask, Tadd, 0)
+        visibility_New = np.concatenate((visibility, copyLastMask), 0)
+
+        return skeleton_New, normSkeleton_New, visibility_New, affineSkeleton_new
+
+
     def paddingSeq(self, skeleton, normSkeleton, imageSequence, ROIs, visibility, affineSkeleton,augImageSeqPair):
         Tadd = abs(skeleton.shape[0] - self.T)
 
@@ -359,52 +381,34 @@ class NUCLA_CrossView(Dataset):
     def get_data(self, view, name_sample):
         imagesList, data_path = self.get_rgbList(view, name_sample)
         jsonList, imgList = alignDataList(os.path.join(self.root_skeleton, view), name_sample, imagesList,'N-UCLA')
-
         assert  len(imgList) == len(jsonList)
-        imageSequence, _, imageSequence_orig = self.get_rgb_data(data_path, imgList)
 
         if self.dataType == '2D':
-            skeleton, usedID, confidence = getJsonData(os.path.join(self.root_skeleton, view), name_sample, jsonList)
-            imageSequence = imageSequence[usedID]
-            imageSequence_orig = imageSequence_orig[usedID]
-
+            skeleton, _, confidence = getJsonData(os.path.join(self.root_skeleton, view), name_sample, jsonList)
         else:
             skeleton = np.load(os.path.join(self.root_skeleton, view, name_sample + '.npy'), allow_pickle=True)
             confidence = np.ones_like(skeleton)
-        #
+        
         T_sample, num_joints, dim = skeleton.shape
         normSkeleton, binaryMask, bboxes = self.get_uniNorm(skeleton)
-
         affineSkeletons = self.getAffineTransformation(skeleton)
 
-        if self.maskType == 'binary':
-            visibility = binaryMask
-        else:
-            visibility = confidence  # mask is from confidence score
-
-        # visibility = binaryMask # mask is 0/1
-        ROIs = self.getROIs(imageSequence_orig, bboxes)
-        augImageSeqPair = self.getAugmentedImageSequencePair(imageSequence_orig, bboxes)
+        if self.maskType == 'binary': visibility = binaryMask
+        else:                         visibility = confidence  # mask is from confidence score
 
         if self.T == 0:
             skeleton_input = skeleton
-            imageSequence_input = imageSequence
             normSkeleton_input = normSkeleton
-            ROIs_input = ROIs
             visibility_input = visibility
             affineSkeletons_input = affineSkeletons
-            augImageSeqPair_input = augImageSeqPair
             # imgSequence = np.zeros((T_sample, 3, 224, 224))
             details = {'name_sample': name_sample, 'T_sample': T_sample, 'time_offset': range(T_sample), 'view':view}
         else:
             if T_sample <= self.T:
                 skeleton_input = skeleton
                 normSkeleton_input = normSkeleton
-                imageSequence_input = imageSequence
-                ROIs_input = ROIs
                 visibility_input = visibility
                 affineSkeletons_input = affineSkeletons
-                augImageSeqPair_input = augImageSeqPair
             else:
                 # skeleton_input = skeleton[0::self.ds, :, :]
                 # imageSequence_input = imageSequence[0::self.ds]
@@ -416,31 +420,32 @@ class NUCLA_CrossView(Dataset):
                     ids_sample.append(id_sample)
 
                 skeleton_input = skeleton[ids_sample, :, :]
-                imageSequence_input = imageSequence[ids_sample]
                 normSkeleton_input = normSkeleton[ids_sample,:,:]
-                ROIs_input = ROIs[ids_sample]
                 visibility_input = visibility[ids_sample,:,:]
 
                 affineSkeletons_input = affineSkeletons[:,ids_sample,:,:]
-                augImageSeqPair_input = augImageSeqPair[:,ids_sample,:,:,:]
 
 
+            # if skeleton_input.shape[0] != self.T:
+            #     skeleton_input, normSkeleton_input, imageSequence_input, ROIs_input, visibility_input, affineSkeletons_input, augImageSeqPair_input \
+            #         = self.paddingSeq(skeleton_input,normSkeleton_input, imageSequence_input, ROIs_input, visibility_input, affineSkeletons_input,augImageSeqPair_input)
             if skeleton_input.shape[0] != self.T:
-                skeleton_input, normSkeleton_input, imageSequence_input, ROIs_input, visibility_input, affineSkeletons_input, augImageSeqPair_input \
-                    = self.paddingSeq(skeleton_input,normSkeleton_input, imageSequence_input, ROIs_input, visibility_input, affineSkeletons_input,augImageSeqPair_input)
+                skeleton_input, normSkeleton_input, visibility_input, affineSkeletons_input \
+                    = self.paddingSeq_ske(skeleton_input, normSkeleton_input, visibility_input, affineSkeletons_input)
 
-        imgSize = (640, 480)
+        # imgSize = (640, 480)
 
-        # normSkeleton, _ = self.get_uniNorm(skeleton_input)
-        heatmap_to_use = self.pose_to_heatmap(skeleton_input, imgSize, 64)
+        # # normSkeleton, _ = self.get_uniNorm(skeleton_input)
+        # heatmap_to_use = self.pose_to_heatmap(skeleton_input, imgSize, 64)
 
-        skeletonData = {'normSkeleton': normSkeleton_input, 'unNormSkeleton': skeleton_input, 'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
+        skeletonData = {'normSkeleton': normSkeleton_input, 'unNormSkeleton': skeleton_input,
+                        'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
         # print('heatsize:', heatmap_to_use.shape[0], 'imgsize:', imageSequence_input.shape[0], 'skeleton size:', normSkeleton.shape[0])
-        assert heatmap_to_use.shape[0] == self.T
+        # assert heatmap_to_use.shape[0] == self.T
         assert normSkeleton_input.shape[0] == self.T
-        assert imageSequence_input.shape[0] == self.T
+        # assert imageSequence_input.shape[0] == self.T
 
-        return heatmap_to_use, imageSequence_input, skeletonData, ROIs_input, augImageSeqPair_input
+        return skeletonData
 
 
     def get_data_multiSeq(self, view, name_sample):
@@ -448,25 +453,18 @@ class NUCLA_CrossView(Dataset):
         jsonList, imgList = alignDataList(os.path.join(self.root_skeleton, view), name_sample, imagesList,'N-UCLA')
 
         assert len(imgList) == len(jsonList)
-        imageSequence, _, imageSequence_orig = self.get_rgb_data(data_path, imgList)
 
         if self.dataType == '2D':
             skeleton, usedID, confidence = getJsonData(os.path.join(self.root_skeleton, view), name_sample, jsonList)
-            imageSequence = imageSequence[usedID]
-            imageSequence_orig = imageSequence_orig[usedID]
         else:
             skeleton = np.load(os.path.join(self.root_skeleton, view, name_sample + '.npy'), allow_pickle=True)
             confidence = np.ones_like(skeleton)
 
         normSkeleton, binaryMask, bboxes = self.get_uniNorm(skeleton)
-        ROIs = self.getROIs(imageSequence_orig, bboxes)
         affineSkeletons = self.getAffineTransformation(skeleton)
 
-
-        if self.maskType == 'binary':
-            visibility = binaryMask
-        else:
-            visibility = confidence  # mask is from confidence score
+        if self.maskType == 'binary': visibility = binaryMask
+        else:                         visibility = confidence  # mask is from confidence score
 
         T_sample, num_joints, dim = normSkeleton.shape
         stride = T_sample / self.clips
@@ -476,27 +474,16 @@ class NUCLA_CrossView(Dataset):
             id_sample = random.randint(int(stride * i), int(stride * (i + 1)) - 1)
             ids_sample.append(id_sample)
         if T_sample <= self.T:
-
-            skeleton_input, normSkeleton_input, imageSequence_inp, ROIs_inp, visibility_input, affineSkeletons_input = self.paddingSeq(skeleton, normSkeleton,
-                                                                                    imageSequence, ROIs,visibility, affineSkeletons)
+            skeleton_input, normSkeleton_input, visibility_input, affineSkeletons_input = \
+                self.paddingSeq_ske(skeleton, normSkeleton, visibility, affineSkeletons)
             temp = np.expand_dims(normSkeleton_input, 0)
             inpSkeleton_all = np.repeat(temp, self.clips, 0)
 
             tempMask = np.expand_dims(visibility_input, 0)
             visibility_input = np.repeat(tempMask, self.clips, 0)
 
-            tempImg = np.expand_dims(imageSequence_inp, 0)
-            imageSequence_input = np.repeat(tempImg, self.clips, 0)
-
             temp_skl = np.expand_dims(skeleton_input, 0)
             skeleton_all = np.repeat(temp_skl, self.clips, 0)
-
-            heatmaps = self.pose_to_heatmap(skeleton_input, (640, 480), 64)
-            tempHeat = np.expand_dims(heatmaps, 0)
-            heatmap_to_use = np.repeat(tempHeat, self.clips, 0)
-
-            temRoi= np.expand_dims(ROIs_inp, 0)
-            ROIs_input = np.repeat(temRoi, self.clips, 0)
 
             temAff = np.expand_dims(affineSkeletons_input,0)
             affineSkeletons_input = np.repeat(temAff,self.clips, 0)
@@ -504,75 +491,47 @@ class NUCLA_CrossView(Dataset):
         else: # T_sample > self.T
 
             inpSkeleton_all = []
-            imageSequence_input = []
             visibility_input = []
-            heatmap_to_use = []
             skeleton_all = []
-            ROIs_input = []
             affineSkeletons_input = []
 
-            heatmaps = self.pose_to_heatmap(skeleton, (640, 480), 64)
             for id in ids_sample:
 
                 if (id - int(self.T / 2)) <= 0 < (id + int(self.T / 2)) < T_sample:
-
                     temp = np.expand_dims(normSkeleton[0:self.T], 0)
-                    tempImg = np.expand_dims(imageSequence[0:self.T], 0)
                     temp_skl = np.expand_dims(skeleton[0:self.T], 0)
-                    tempHeat = np.expand_dims(heatmaps[0:self.T], 0)
-                    temRoi = np.expand_dims(ROIs[0:self.T], 0)
                     tempMask = np.expand_dims(visibility[0:self.T], 0)
                     temAff = np.expand_dims(affineSkeletons[:,0:self.T],0)
-
-
                 elif 0 < (id-int(self.T/2)) <= (id + int(self.T / 2)) < T_sample:
                     temp = np.expand_dims(normSkeleton[id - int(self.T / 2):id + int(self.T / 2)], 0)
-                    tempImg = np.expand_dims(imageSequence[id - int(self.T / 2):id + int(self.T / 2)], 0)
                     temp_skl = np.expand_dims(skeleton[id - int(self.T / 2):id + int(self.T / 2)], 0)
-                    tempHeat = np.expand_dims(heatmaps[id - int(self.T / 2):id + int(self.T / 2)], 0)
-                    temRoi = np.expand_dims(ROIs[id - int(self.T / 2):id + int(self.T / 2)], 0)
                     tempMask = np.expand_dims(visibility[id - int(self.T / 2):id + int(self.T / 2)],0)
                     temAff = np.expand_dims(affineSkeletons[:,id - int(self.T / 2):id + int(self.T / 2)],0)
 
                 elif (id - int(self.T/2)) < T_sample <= (id+int(self.T / 2)):
-
                     temp = np.expand_dims(normSkeleton[T_sample - self.T:], 0)
-                    tempImg = np.expand_dims(imageSequence[T_sample - self.T:], 0)
                     temp_skl = np.expand_dims(skeleton[T_sample - self.T:], 0)
-                    tempHeat = np.expand_dims(heatmaps[T_sample - self.T:], 0)
-                    temRoi = np.expand_dims(ROIs[T_sample - self.T:], 0)
                     tempMask = np.expand_dims(visibility[T_sample - self.T:], 0)
                     temAff = np.expand_dims(affineSkeletons[:, T_sample - self.T:],0)
-
-
                 else:
                     temp = np.expand_dims(normSkeleton[T_sample - self.T:], 0)
-                    tempImg = np.expand_dims(imageSequence[T_sample - self.T:], 0)
                     temp_skl = np.expand_dims(skeleton[T_sample - self.T:], 0)
-                    tempHeat = np.expand_dims(heatmaps[T_sample - self.T:], 0)
-                    temRoi = np.expand_dims(ROIs[T_sample - self.T:], 0)
                     tempMask = np.expand_dims(visibility[T_sample - self.T:], 0)
                     temAff = np.expand_dims(affineSkeletons[:, T_sample - self.T:], 0)
 
                 inpSkeleton_all.append(temp)
                 skeleton_all.append(temp_skl)
-                imageSequence_input.append(tempImg)
-                heatmap_to_use.append(tempHeat)
-                ROIs_input.append(temRoi)
                 visibility_input.append(tempMask)
                 affineSkeletons_input.append(temAff)
 
             inpSkeleton_all = np.concatenate((inpSkeleton_all), 0)
-            imageSequence_input = np.concatenate((imageSequence_input), 0)
             skeleton_all = np.concatenate((skeleton_all), 0)
-            heatmap_to_use = np.concatenate((heatmap_to_use), 0)
-            ROIs_input = np.concatenate((ROIs_input), 0)
             visibility_input = np.concatenate((visibility_input), 0)
             affineSkeletons_input = np.concatenate((affineSkeletons_input),0)
-
-
-        skeletonData = {'normSkeleton':inpSkeleton_all, 'unNormSkeleton': skeleton_all, 'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
-        return heatmap_to_use, imageSequence_input, skeletonData, ROIs_input
+        skeletonData = {'normSkeleton':inpSkeleton_all, 'unNormSkeleton': skeleton_all,
+                        'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
+        
+        return skeletonData
 
 
     def __getitem__(self, index):
@@ -590,15 +549,15 @@ class NUCLA_CrossView(Dataset):
             view, name_sample = self.samples_list[index]
 
         if self.sampling == 'Single':
-            heat_maps, images, skeletons, rois, augImagePair = self.get_data(view, name_sample) 
+            skeletons = self.get_data(view, name_sample) 
         else:
-            heat_maps, images, skeletons, rois = self.get_data_multiSeq(view, name_sample)
+            skeletons = self.get_data_multiSeq(view, name_sample)
 
-        'output affine skeletons:'
+        # output affine skeletons
 
         label_action = self.action_list[name_sample[:3]]
-        dicts = {'heat': heat_maps, 'input_images': images, 'input_skeletons': skeletons,'input_imagePair':augImagePair,
-                 'action': label_action, 'sample_name':name_sample, 'input_rois':rois, 'cam':view}
+        dicts = {'input_skeletons': skeletons, 'action': label_action,
+                 'sample_name':name_sample, 'cam':view}
 
         return dicts
 

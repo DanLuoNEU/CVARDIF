@@ -51,7 +51,7 @@ def get_parser():
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
     parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.503, type=float)
+    parser.add_argument('--gumbel_thresh', default=0.5, type=float) # 0.503
 
     parser.add_argument('--gpu_id', default=7, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
