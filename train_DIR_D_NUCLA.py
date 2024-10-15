@@ -31,7 +31,7 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/202410_CVARDIF',
+    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/202410_CVARDIF/DIR_D',
                         help='the work folder for storing experiment results')
     parser.add_argument('--cus_n', default='', help='customized name')
     

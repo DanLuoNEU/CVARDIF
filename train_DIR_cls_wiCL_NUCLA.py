@@ -23,7 +23,7 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/NUCLA/DIR_wiCL',
+    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/NUCLA/DIR_cls_wiCL',
                         help='the work folder for storing experiment results')
     parser.add_argument('--cus_n', default='', help='customized name')
     
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     # else:
     #     args.dy_pretrain = './pretrained/N-UCLA/' + args.setup + '/' + args.sampling + '/pretrainedDyan_BI.pth'
     main(args)
-    'plotting results:'
+    # 'plotting results:'
     # getPlots(LOSS,LOSS_CLS, LOSS_MSE, LOSS_BI, ACC,fig_name='DY_CL.pdf')
     torch.cuda.empty_cache()
     print('done')
