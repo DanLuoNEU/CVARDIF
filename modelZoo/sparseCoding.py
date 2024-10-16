@@ -145,7 +145,6 @@ class DyanEncoder(nn.Module):
 
     def forward(self, x,T):
         '''with Reweighted Heuristic Algorithm
-        
         '''
         dic = creatRealDictionary(T, self.rr,self.theta, self.gpu_id)
         # print('rr:', self.rr, 'theta:', self.theta)
@@ -175,7 +174,6 @@ class DyanEncoder(nn.Module):
     
     def forward2(self,x, T):
         """Without Reweighted Heuristic Algorithm
-        
         """
         dic = creatRealDictionary(T, self.rr, self.theta, self.gpu_id)
         sparseCode = fista_new(dic, x, self.lam, 100, self.gpu_id)

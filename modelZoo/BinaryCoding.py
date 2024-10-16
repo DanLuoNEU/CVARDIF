@@ -131,19 +131,22 @@ class binarizeSparseCode(nn.Module):
         self.fistaLam = fistaLam
         # self.sparsecoding = sparseCodingGenerator(self.Drr, self.Dtheta, self.PRE, self.gpu_id)
         # self.BinaryCoding = binaryCoding(num_binary=self.k)
-        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
+        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta,
+                                        lam=fistaLam,
+                                        gpu_id=self.gpu_id)
         self.BinaryCoding = GumbelSigmoid()
 
     def forward(self, x, T, bi_thresh):
-        sparseCode, Dict, _ = self.sparseCoding.forward2(x, T)
+        # # Regular DYAN
+        # sparseCode, Dict, _ = self.sparseCoding.forward2(x, T) 
         # sparseCode = sparseCode.permute(2,1,0).unsqueeze(3)
         # # sparseCode = sparseCode.reshape(1, T, 20, 2)
         # binaryCode = self.binaryCoding(sparseCode)
-
         # reconstruction = torch.matmul(Dict, sparseCode)
+        # RHdyan + Gumbel
+        sparseCode, Dict, _ = self.sparseCoding(x, T) 
         binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
                                        force_hard=True, inference=self.Inference)
-
         temp = sparseCode*binaryCode
         reconstruction = torch.matmul(Dict, temp)
         
@@ -202,11 +205,11 @@ class classificationGlobal(nn.Module):
 
         # self.linear = nn.Sequential(nn.Linear(256*10*2,1024),nn.LeakyReLU(),nn.Linear(1024,512),nn.LeakyReLU(), nn.Linear(512, 128), nn.LeakyReLU())
         if self.useCL == False:
-
             # self.cls = nn.Linear(128, self.num_class)
-            self.cls = nn.Sequential(nn.Linear(128,128),nn.LeakyReLU(),nn.Linear(128,self.num_class))
+            self.cls = nn.Sequential(nn.Linear(128,128),
+                                     nn.LeakyReLU(),
+                                     nn.Linear(128,self.num_class))
         else:
-
             self.cls = nn.Sequential(nn.Linear(128, self.num_class))
         self.relu = nn.LeakyReLU()
 
@@ -418,7 +421,10 @@ class Fullclassification(nn.Module):
         #     self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
         
         self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
-        self.Classifier = classificationGlobal(num_class=self.num_class, Npole=self.Npole, dataType=self.dataType, useCL=self.useCL)
+        self.Classifier = classificationGlobal(num_class=self.num_class,
+                                               Npole=self.Npole,
+                                               dataType=self.dataType,
+                                               useCL=self.useCL)
 
     def forward(self, x, bi_thresh):
         # sparseCode, Dict, R = self.sparseCoding.forward2(x, T) # w.o. RH
@@ -529,7 +535,9 @@ class MLP(nn.Module):
         return x_out
 
 class contrastiveNet(nn.Module):
-    def __init__(self, dim_embed, Npole, Drr, Dtheta, Inference, gpu_id, dim, mode, dataType,fistaLam,fineTune,useCL, nClip):
+    def __init__(self, dim_embed, Npole, Drr, Dtheta, fistaLam,
+                 mode, Inference, fineTune, useCL, 
+                 dim, dataType, nClip, gpu_id):
         super(contrastiveNet, self).__init__()
 
         # self.dim_in = dim_in
@@ -554,7 +562,11 @@ class contrastiveNet(nn.Module):
             self.backbone = RGBAction(num_class=self.num_class, kinetics_pretrain='./pretrained/i3d_kinetics.pth')
             dim_mlp = self.backbone.cls.in_features
         else:
-            self.backbone = Fullclassification(self.num_class, self.Npole, self.Drr, self.Dtheta, self.dim_data, self.dataType, self.Inference, self.gpu_id, self.fistaLam,self.useGroup, self.group_reg, self.useCL)
+            self.backbone = Fullclassification(self.num_class, self.Npole, self.Drr, self.Dtheta,
+                                               self.dim_data, self.dataType, self.Inference, 
+                                               self.gpu_id, self.fistaLam,
+                                               self.useGroup, self.group_reg,
+                                               self.useCL)
         # if self.useCL == False:
         #     dim_mlp = self.backbone.Classifier.cls.in_features
         # else:
@@ -619,15 +631,9 @@ class contrastiveNet(nn.Module):
             return logits, labels
         else:
             if self.mode == 'rgb':
-                
-                return self.backbone(x,y )
-            else:
-               
                 return self.backbone(x, y)
-
-
-
-
+            else:
+                return self.backbone(x, y)
 
 
 if __name__ == '__main__':

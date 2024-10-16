@@ -9,11 +9,11 @@ import torch
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 
-from dataset.crossView_UCLA import np, random, NUCLA_CrossView
+from dataset.crossView_UCLA_ske import os, np, random, NUCLA_CrossView
 from modelZoo.BinaryCoding import Fullclassification, nn, gridRing, classificationWSparseCode
-from modelZoo.BinaryCoding import classificationWBinarizationRGB, classificationWBinarizationRGBDY
-from modelZoo.BinaryCoding import contrastiveNet
-from test_cls_CV import testing, getPlots
+# from modelZoo.BinaryCoding import classificationWBinarizationRGB, classificationWBinarizationRGBDY
+# from modelZoo.BinaryCoding import contrastiveNet
+from test_cls_CV_DIR import testing, getPlots
 from utils import load_pretrainedModel_endtoEnd
 
 seed = 123
@@ -28,7 +28,7 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/NUCLA/',
+    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/202410_CVARDIF/',
                         help='the work folder for storing experiment results')
     parser.add_argument('--cus_n', default='', help='customized name')
     
@@ -37,79 +37,35 @@ def get_parser():
     parser.add_argument('--num_class', default=10, type=int, help='')
     parser.add_argument('--dataType', default='2D', help='')
     parser.add_argument('--sampling', default='Single', help='')
-    parser.add_argument('--bs', default=4, type=int, help='')
-    parser.add_argument('--nw', default=12, type=int, help='')
+    parser.add_argument('--nClip', default=6, type=int, help='') # sampling=='multi' or sampling!='Single'
+    parser.add_argument('--bs', default=8, type=int, help='')
+    parser.add_argument('--nw', default=8, type=int, help='')
     
     parser.add_argument('--mode', default='dy+bi+cl', help='dy+bi+cl | dy+cl | rgb+dy')
-    parser.add_argument('--RHdyan', default='0', type=str2bool, help='')
+    parser.add_argument('--RHdyan', default='1', type=str2bool, help='')
     parser.add_argument('--withMask', default='0', type=str2bool, help='')
     parser.add_argument('--maskType', default='None', help='')
     parser.add_argument('--fusion', default='0', type=str2bool, help='')
     parser.add_argument('--groupLasso', default='0', type=str2bool, help='')
 
-
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
     parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.5, type=float) # 0.503
+    parser.add_argument('--gumbel_thresh', default=0.505, type=float) # 0.503
 
-    parser.add_argument('--gpu_id', default=7, type=int, help='')
+    parser.add_argument('--gpu_id', default=6, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
-    parser.add_argument('--lr', default=1e-3, type=float, help='classifier')
-    parser.add_argument('--lr_2', default=1e-3, type=float, help='sparse coding')
-    parser.add_argument('--Alpha', default=1e-2, type=float, help='bi loss')
-    parser.add_argument('--lam1', default=2, type=float, help='cls loss')
+    parser.add_argument('--lr', default=5e-4, type=float, help='sparse coding')
+    parser.add_argument('--lr_2', default=1e-3, type=float, help='classifier')
+    parser.add_argument('--Alpha', default=0.1, type=float, help='bi loss')
+    parser.add_argument('--lam1', default=1, type=float, help='cls loss')
     parser.add_argument('--lam2', default=0.5, type=float, help='mse loss')
 
     return parser
 
 def main(args):
-    '------configuration:-------------------------------------------'
-    # dataset = 'NUCLA'
-    # Alpha = 0.01# bi loss
-    # lam1 = 2 # cls loss
-    # lam2 = 0.5 # mse loss
-    # N = 80*2
-    # Epoch = 100
-    # num_class = 10
-    # dataType = '2D'
-    # sampling = 'Single' #sampling strategy
-
-    # RHdyan = False
-    # withMask = False
-    # groupLasso = False
-    # group_lam = 0.1
-    # if groupLasso:
-    #     fistaLam = 0.00
-    # else:
-    #     fistaLam = 0.1
-
-    # maskType = 'None'
-    # if sampling == 'Single':
-    #     num_workers = 4
-    #     bz = 12
-    # else:
-    #     num_workers = 4
-    #     bz = 4
-
-    # T = 36 # input clip length
-    # # mode = 'dy+bi+cl'
-    # # mode = 'dy+cl'
-    # mode = 'rgb+dy'
-    # setup = 'setup1'
-    # modelRoot = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/'
-    
-
-    # pdb.set_trace()
-    # fusion = False
-    # num_class = 10
-    # # v1,v2 train, v3 test;
-    # lr = 1e-3 # classifier
-    # lr_2 = 1e-3  # sparse codeing
-    # gumbel_thresh = 0.503 # or try 0.503
-    # print('gumbel threshold:',gumbel_thresh)
-    # 'change to your own model path'
-
+    args.saveModel = args.modelRoot + f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_cls_noCL_{args.mode}/'
+    if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
     '============================================= Main Body of script================================================='
     P,Pall = gridRing(args.N)
     Drr = abs(P)
@@ -119,15 +75,17 @@ def main(args):
     # Dataset
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/' # './data/CV/' + args.setup + '/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
-    trainSet = NUCLA_CrossView(root_list=path_list, dataType=args.dataType,
-                               sampling=args.sampling,  T=args.T, maskType=args.maskType,
-                               setup=args.setup, phase='train', nClip=4)
+    trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
+                               setup=args.setup, dataType=args.dataType,
+                               sampling=args.sampling, nClip=args.nClip,
+                               T=args.T, maskType=args.maskType) 
     trainloader = DataLoader(trainSet, shuffle=True,
                              batch_size=args.bs, num_workers=args.nw)
-    testSet = NUCLA_CrossView(root_list=path_list, dataType=args.dataType,
-                              sampling=args.sampling, T=args.T, maskType=args.maskType, 
-                              setup=args.setup, phase='test', nClip=4)
-    testloader = DataLoader(testSet, shuffle=True,
+    testSet = NUCLA_CrossView(root_list=path_list, phase='test',
+                              setup=args.setup, dataType=args.dataType,
+                              sampling=args.sampling, nClip=args.nClip,
+                              T=args.T, maskType=args.maskType)
+    testloader = DataLoader(testSet, shuffle=False,
                             batch_size=args.bs, num_workers=args.nw)
 
     if args.mode == 'dy+bi+cl':
@@ -137,21 +95,18 @@ def main(args):
         stateDict = torch.load(pretrain, map_location=args.map_loc)['state_dict']
         Drr = stateDict['sparseCoding.rr']
         Dtheta = stateDict['sparseCoding.theta']
-    
-        net = Fullclassification(num_class=args.num_class,
-                                Npole=args.N+1,
-                                Drr=Drr, Dtheta=Dtheta,
-                                dim=2, dataType=args.dataType,
-                                Inference=True,
-                                fistaLam=args.lam_f,
-                                gpu_id=args.gpu_id,
-                                useCL=False,
-                                group=False, group_reg=0).cuda(args.gpu_id)
+        # Model
+        net = Fullclassification(Drr=Drr, Dtheta=Dtheta,
+                                 fistaLam=args.lam_f, gpu_id=args.gpu_id,
+                                 num_class=args.num_class, Npole=args.N+1, 
+                                 dataType=args.dataType, useCL=False,
+                                 Inference=True,
+                                 dim=2, group=False, group_reg=0).cuda(args.gpu_id)
         # Freeze the Dictionary part
         net.sparseCoding.rr.requires_grad = False
         net.sparseCoding.theta.requires_grad = False
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()),
-                                    lr=args.lr, weight_decay=0.001, momentum=0.9)
+                                    lr=args.lr_2, weight_decay=0.001, momentum=0.9)
     elif args.mode == 'dy+cl':
         # NOTE: this mode is only for regular DYAN so far
         # pretrain = './pretrained/NUCLA/' + setup + '/' + sampling + '/pretrainedDyan.pth'
@@ -195,51 +150,7 @@ def main(args):
         # ipdb.set_trace()
         net.sparseCoding.rr.requires_grad = False
         net.sparseCoding.theta.requires_grad = False
-    elif args.mode == 'rgb':
-        
-        # kinetics_pretrain = './pretrained/i3d_kinetics.pth'
-        pretrain = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/rhDYAN_bi_rgb_Att_2/100.pth'
-        print('pretrain:', pretrain)
-        stateDict = torch.load(pretrain, map_location=args.map_loc)['state_dict']
-        net = classificationWBinarizationRGB( args.num_class, T=36,
-                                             Npole=args.N+1, Drr=Drr, Dtheta=Dtheta,
-                                             dataType='rgb', gpu_id=args.gpu_id).cuda(args.gpu_id)
-        net.load_state_dict(stateDict)
-        'fixed pretrained binarycoding, getRGB'
-        # for params in net.binaryCoding.parameters():
-        #     params.requires_grad = False
-        # for params in net.getRGBFeature.parameters():
-        #     params.requires_grad = False
-        # optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), lr=1e-3, weight_decay=0.001,
-        #                             momentum=0.9)
-        optimizer = torch.optim.SGD([
-            {'params': filter(lambda x: x.requires_grad, net.binaryCoding.parameters()), 'lr': 1e-4},
-            {'params': filter(lambda x: x.requires_grad, net.Classifier.parameters()), 'lr': args.lr},
-            {'params': filter(lambda x: x.requires_grad, net.getRGBFeature.parameters()), 'lr': args.lr}],
-            weight_decay=1e-4, momentum=0.9)
-        # ipdb.set_trace()
-    elif args.mode == 'rgb+dy':
-        pretrain2 = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/rhDYAN_bi_rgb_Att_2/100.pth'
-        pretrain1 = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/rhDYAN_bi/100.pth'
-        net = classificationWBinarizationRGBDY(pretrain1, pretrain2, args.num_class, T=args.T,
-                                               Npole=args.N+1,
-                                               gpu_id=args.gpu_id).cuda(args.gpu_id)
-        optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), lr=1e-3, weight_decay=0.001,
-                                    momentum=0.9)
-    else: # with CL
-        'NOTE: useCL --> if true, network is under CL setting, while false means no CL involved'
-        net = contrastiveNet(dim_embed=128, Npole=args.N + 1, Drr=Drr, Dtheta=Dtheta,
-                             Inference=True, gpu_id=args.gpu_id, dim=2,
-                            dataType='2D', fistaLam=0.1,
-                            fineTune=True, useCL=False).cuda(args.gpu_id)
-        optimizer = torch.optim.SGD(
-            [{'params': filter(lambda x: x.requires_grad, net.backbone.sparseCoding.parameters()), 'lr': args.lr_2},
-            {'params': filter(lambda x: x.requires_grad, net.backbone.Classifier.parameters()), 'lr': args.lr}],
-            weight_decay=1e-4, momentum=0.9)
-        stateDict = torch.load(args.dy_pretrain, map_location=args.map_loc)['state_dict']
-        net = load_pretrainedModel_endtoEnd(stateDict, net)
-        # print('check')
-
+    
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 70], gamma=0.1)
     Criterion = torch.nn.CrossEntropyLoss()
     mseLoss = torch.nn.MSELoss()
@@ -250,9 +161,9 @@ def main(args):
     LOSS_CLS = []
     LOSS_MSE = []
     LOSS_BI = []
-    print('Experiment config:\nsetup:',args.setup,'clip:', args.sampling,
-          'Alpha:',args.Alpha,'lam1:',args.lam1,'lam2:',args.lam2,
-          'lr:',args.lr,'lr_2:',args.lr_2)
+    print('Experiment config | setup:',args.setup,'sampling:', args.sampling,
+          '\n\tAlpha(bi):',args.Alpha,'lam1(cls):',args.lam1,'lam2(mse):',args.lam2,
+          'lr(mse):',args.lr,'lr_2(cls):',args.lr_2)
     for epoch in range(1, args.Epoch+1):
         print('start training epoch:', epoch)
         lossVal = []
@@ -264,8 +175,6 @@ def main(args):
             optimizer.zero_grad()
 
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
-            images = sample['input_images'].float().cuda(args.gpu_id)
-            ROIs = sample['input_rois'].float().cuda(args.gpu_id)
             visibility = sample['input_skeletons']['visibility'].float().cuda(args.gpu_id)
             gt_label = sample['action'].cuda(args.gpu_id)
 
@@ -274,15 +183,10 @@ def main(args):
                 input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1)  #bz, T, 25, 2
                 input_mask = visibility.reshape(visibility.shape[0], t, -1)
                 nClip = 1
-                input_images = images
-                input_rois = ROIs
-
             else:
                 t = skeletons.shape[2]
                 input_skeletons = skeletons.reshape(skeletons.shape[0], skeletons.shape[1], t, -1) #bz,clip, T, 25, 2 --> bz*clip, T, 50
                 input_mask = visibility.reshape(visibility.shape[0]*visibility.shape[1], t, -1)
-                input_images = images.reshape(images.shape[0]*images.shape[1], t, 3, 224, 224)
-                input_rois = ROIs.reshape(ROIs.shape[0]*ROIs.shape[1], t, 3, 224, 224)
                 nClip = skeletons.shape[1]
 
             if args.withMask:
@@ -294,15 +198,14 @@ def main(args):
                 # gt_skeletons = input_skeletons
 
             if args.mode == 'dy+bi+cl':
-                # NOTE: dy+bi+cl
                 keep_index = None
-                actPred, lastFeat, binaryCode, output_skeletons  = net(input_skeletons, t, args.gumbel_thresh) #bi_thresh=gumbel threshold
+                actPred, lastFeat, binaryCode, output_skeletons  = net(input_skeletons, args.gumbel_thresh) #bi_thresh=gumbel threshold
                 # actPred, output_skeletons,_ = net.forward2(input_skeletons, t, keep_index)
                 actPred = actPred.reshape(skeletons.shape[0], nClip, args.num_class)
                 actPred = torch.mean(actPred, 1)
                 
                 # loss = lam1 * Criterion(actPred, gt_label) + lam2 * mseLoss(output_skeletons, input_skeletons)
-                loss = Criterion(actPred, gt_label)
+                loss = args.lam1*Criterion(actPred, gt_label)
                 bi_gt = torch.zeros_like(binaryCode).cuda(args.gpu_id)
                 lossMSE.append(mseLoss(output_skeletons, input_skeletons).data.item())
                 lossBi.append(L1loss(binaryCode, bi_gt).data.item())
@@ -318,59 +221,12 @@ def main(args):
                 loss = Criterion(actPred, gt_label) #'with fixed dyan'
                 lossMSE.append(mseLoss(output_skeletons, input_skeletons).data.item())
                 lossBi.append(0)
-            elif args.mode == 'rgb':
-                keep_index = None
-                b, t, c, x, y = input_images.shape
-                # ipdb.set_trace()
-                actPred, binaryCode, output_feat,input_feat = net(input_images.reshape(b*t,c, x, y), input_rois.reshape(b*t, c, x, y))
-                # actPred, _ = net(input_images, input_rois)
-                # ipdb.set_trace()
-                bi_gt = torch.zeros_like(binaryCode).cuda(args.gpu_id)
-                actPred = actPred.reshape(skeletons.shape[0], nClip, args.num_class)
-                actPred = torch.mean(actPred, 1)    
-                
-                # loss = Criterion(actPred, gt_label)
-                # print(gt_label)
-            
-                loss = args.lam1 * Criterion(actPred, gt_label) + args.lam2 * mseLoss(output_feat, input_feat) \
-                    + args.Alpha * L1loss(binaryCode, bi_gt)
-                # loss = mseLoss(output_feat, input_feat) + 0.1 * L1loss(binaryCode, bi_gt)
-                # lossMSE.append(mseLoss(output_skeletons, input_skeletons.squeeze(-1)).data.item())
-                # print('output shape:', output_skeletons.shape, 'mse:', mseLoss(output_skeletons, input_skeletons).data.item())
-
-            
-                lossMSE.append(mseLoss(output_feat, input_feat).data.item())
-                lossBi.append(L1loss(binaryCode, bi_gt).data.item())
-
-            elif args.mode == 'rgb+dy':
-                keep_index = None
-                b, t, c, x, y = input_images.shape
-                actPred  = net(input_skeletons, t,input_images.reshape(b*t,c, x, y), input_rois.reshape(b*t, c, x, y))
-                loss = Criterion(actPred, gt_label)
-            
-            else:
-                input_seletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
-                actPred, lastFeat, binaryCode, output_skeletons = net(input_skeletons, args.gumbel_thresh)
-                bi_gt = torch.zeros_like(binaryCode).cuda(args.gpu_id)
-                actPred = actPred.reshape(skeletons.shape[0], nClip, args.num_class)
-                actPred = torch.mean(actPred, 1)    
-
-                loss = args.lam1 * Criterion(actPred, gt_label) + args.lam2 * mseLoss(output_skeletons, input_skeletons.squeeze(-1)) \
-                    + args.Alpha * L1loss(binaryCode, bi_gt)
-
-                lossMSE.append(mseLoss(output_skeletons, input_skeletons.squeeze(-1)).data.item())
-            
-                lossBi.append(L1loss(binaryCode, bi_gt).data.item())
-
 
             loss.backward()
             # ipdb.set_trace()
             optimizer.step()
             lossVal.append(loss.data.item())
-
             lossCls.append(Criterion(actPred, gt_label).data.item())
-
-
         loss_val = np.mean(np.array(lossVal))
         # LOSS.append(loss_val)
         # LOSS_CLS.append(np.mean(np.array((lossCls))))
@@ -380,10 +236,13 @@ def main(args):
         print('epoch:', epoch, 'loss:', loss_val)
         end_time = time.time()
         print('training time(h):', (end_time - start_time)/3600)
-
         scheduler.step()
         
         if epoch % 1 == 0:
+            if epoch % 5 ==0 :
+                torch.save({'state_dict': net.state_dict(),
+                   'optimizer': optimizer.state_dict()}, 
+                   args.saveModel + f"{epoch}.pth")
 
             Acc = testing(testloader, net,
                           args.gpu_id, args.sampling,
@@ -392,7 +251,6 @@ def main(args):
                           keep_index)
             print('testing epoch:',epoch, 'Acc:%.4f'% Acc)
             ACC.append(Acc)
-
         
     torch.cuda.empty_cache()
     print('done')
@@ -414,4 +272,12 @@ if __name__ == "__main__":
            args.dy_pretrain = './pretrained/NUCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_noCL_v2.pth'
     else:
         args.dy_pretrain = './pretrained/N-UCLA/' + args.setup + '/' + args.sampling + '/pretrainedDyan_BI.pth'
+    
+    # if args.RHdyan:
+    #     # args.dy_pretrain = './pretrained/NUCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_noCL_v2.pth'
+    #     args.dy_pretrain = os.path.join(args.modelRoot, f"NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{args.mode[:-3]}/5.pth")
+    # else:
+    #     args.dy_pretrain = ''
+    # print(f"dy_pretrain Model: {args.dy_pretrain}")
+    
     main(args)

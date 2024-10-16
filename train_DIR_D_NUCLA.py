@@ -14,7 +14,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 
-from dataset.crossView_UCLA import NUCLA_CrossView
+# from dataset.crossView_UCLA import NUCLA_CrossView
+from dataset.crossView_UCLA_ske import NUCLA_CrossView
 from modelZoo.BinaryCoding import DyanEncoder, binarizeSparseCode
 from utils import gridRing
 # from test_cls_CV import testing, getPlots
@@ -31,30 +32,32 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/202410_CVARDIF/DIR_D',
+    parser.add_argument('--modelRoot', default=f'/data/Dan/202111_CVAR/202410_CVARDIF/',
                         help='the work folder for storing experiment results')
     parser.add_argument('--cus_n', default='', help='customized name')
-    
+    parser.add_argument('--mode', default='dy+bi')
     parser.add_argument('--setup', default='setup1', help='')
     parser.add_argument('--sampling', default='Single', help='')
 
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
     parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.1, type=float)
+    parser.add_argument('--gumbel_thresh', default=0.503, type=float) # 0.501/0.503/0.510
 
     parser.add_argument('--gpu_id', default=7, type=int, help='')
-    parser.add_argument('--bs', default=2, type=int, help='')
-    parser.add_argument('--nw', default=1, type=int, help='')
+    parser.add_argument('--bs', default=8, type=int, help='')
+    parser.add_argument('--nw', default=8, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
-    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--Alpha', default=1e-1, type=float, help='bi loss')
+    parser.add_argument('--lam2', default=5e-1, type=float, help='mse loss')
+    parser.add_argument('--lr_2', default=1e-4, type=float)
 
     return parser
 
 def main(args):
     # Configurations
     ## Paths
-    args.saveModel = args.modelRoot + f'/{args.sampling}_bi_DIR_D/'
+    args.saveModel = args.modelRoot + f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{args.mode}/'
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
     ## Dictionary
     P, Pall = gridRing(args.N)
@@ -75,20 +78,20 @@ def main(args):
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
     trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
-                               dataType='2D',  T=args.T, setup=args.setup,
-                               sampling=args.sampling, maskType='score',
-                               nClip=10)
+                               setup=args.setup, dataType=args.dataType,
+                               sampling=args.sampling, nClip=6,
+                               T=args.T, maskType='None')
     trainloader = DataLoader(trainSet, shuffle=True,
                              batch_size=args.bs, num_workers=args.nw)
     testSet = NUCLA_CrossView(root_list=path_list, phase='test',
-                              dataType='2D', T=args.T, setup=args.setup,
-                              sampling=args.sampling, maskType='score',
-                              nClip=10)
-    testloader = DataLoader(testSet, shuffle=True,
+                              setup=args.setup, dataType=args.dataType,
+                              sampling=args.sampling, nClip=6,
+                              T=args.T, maskType='None')
+    testloader = DataLoader(testSet, shuffle=False,
                             batch_size=args.bs, num_workers=args.nw)
     # Training Strategy
     optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), 
-                                lr=args.lr, weight_decay=0.001, momentum=0.9)
+                                lr=args.lr_2, weight_decay=0.001, momentum=0.9)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 70], gamma=0.1)
     # Loss
     mseLoss = torch.nn.MSELoss()
@@ -109,19 +112,20 @@ def main(args):
             t = skeletons.shape[1] # (batch_size x num_clips) x t x dim_joint? x num_joint?
             input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1) # (batch_size x num_clips) x t x (dim_joint x num_joint)
             ### rh-dyan + bi
-            binaryCode, output_skeletons, _ = net(input_skeletons, t, 0.5)
+            binaryCode, output_skeletons, _ = net(input_skeletons, t, args.gumbel_thresh)
             target_coeff = torch.zeros_like(binaryCode).cuda(args.gpu_id)
-            loss = mseLoss(output_skeletons, input_skeletons) + 0.5*l1Loss(binaryCode,target_coeff)
+            loss = args.lam2*mseLoss(output_skeletons, input_skeletons) + args.Alpha*l1Loss(binaryCode,target_coeff)
             #### BP and Log
             loss.backward()
             optimizer.step()
             # ipdb.set_trace()
-            lossMSE.append(mseLoss(output_skeletons, input_skeletons).data.item())
-            lossL1.append(0.5*l1Loss(binaryCode,target_coeff).data.item())
+            lossMSE.append(args.lam2*mseLoss(output_skeletons, input_skeletons).data.item())
+            lossL1.append(args.Alpha*l1Loss(binaryCode,target_coeff).data.item())
             lossVal.append(loss.data.item())
         end_time = time.time()
         # print('epoch:', epoch, 'loss:', np.mean(np.asarray(lossVal)), 'time(h):', (end_time - start_time) / 3600)
-        print('epoch:', epoch, 'mse loss:', np.mean(np.asarray(lossMSE)), 'L1 loss:', np.mean(np.asarray(lossL1)),
+        print('epoch:', epoch, 'mse loss:', np.mean(np.asarray(lossMSE)),
+              'L1 loss:', np.mean(np.asarray(lossL1)),
               'duration:', (end_time - start_time) / 3600, 'hr')
 
         if epoch % 5 == 0:
@@ -139,7 +143,7 @@ def main(args):
                     # output_skeletons = net.prediction(input_skeletons[:,0:t-1], t-1)
 
                     # 'rhDyan+Bi'
-                    _, output_skeletons,_ = net(input_skeletons, t, 0.5)
+                    _, output_skeletons, _ = net(input_skeletons, t, 0.5)
                     error = torch.norm(output_skeletons - input_skeletons).cpu()
                     ERROR[i] = error
 

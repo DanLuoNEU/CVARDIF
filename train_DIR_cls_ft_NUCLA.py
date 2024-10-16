@@ -7,10 +7,10 @@ import torch
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 
-from dataset.crossView_UCLA import os, np, random, NUCLA_CrossView
+from dataset.crossView_UCLA_ske import os, np, random, NUCLA_CrossView
 from modelZoo.BinaryCoding import nn, gridRing,contrastiveNet
 from utils import load_fineTune_model
-from test_cls_CV import testing, getPlots
+from test_cls_CV_DIR import testing, getPlots
 
 random.seed(0)
 np.random.seed(0)
@@ -32,17 +32,18 @@ def get_parser():
     parser.add_argument('--num_class', default=10, type=int, help='') # num_class = 10
     parser.add_argument('--dataType', default='2D', help='') # dataType = '2D'
     parser.add_argument('--sampling', default='Single', help='') # sampling = 'Multi' #sampling strategy
-    parser.add_argument('--bs', default=4, type=int, help='')
-    parser.add_argument('--nw', default=12, type=int, help='')
+    parser.add_argument('--nClip', default=6, type=int, help='') # sampling=='multi' or sampling!='Single'
+    parser.add_argument('--bs', default=8, type=int, help='')
+    parser.add_argument('--nw', default=8, type=int, help='')
     
     parser.add_argument('--mode', default='dy+bi+cl', help='dy+bi+cl | dy+cl | rgb+dy') # mode = 'dy+bi+cl'
     parser.add_argument('--RHdyan', default='1', type=str2bool, help='') # RHdyan = True
     parser.add_argument('--withMask', default='0', type=str2bool, help='') # withMask = False
     parser.add_argument('--maskType', default='None', help='') # maskType = 'score'
     parser.add_argument('--contrastive', default='1', type=str2bool, help='') # constrastive = True
+    parser.add_argument('--finetune', default='1', type=str2bool, help='') 
     parser.add_argument('--fusion', default='0', type=str2bool, help='') # fusion = False
     parser.add_argument('--groupLasso', default='0', type=str2bool, help='')
-
 
     parser.add_argument('--T', default=36, type=int, help='') # T = 36 # input clip length
     parser.add_argument('--N', default=80*2, type=int, help='') # N = 80*2
@@ -51,18 +52,18 @@ def get_parser():
 
     parser.add_argument('--gpu_id', default=7, type=int, help='') # gpu_id = 5
     parser.add_argument('--Epoch', default=100, type=int, help='') # Epoch = 100
-    parser.add_argument('--lr', default=1e-3, type=float, help='classifier') # lr = 1e-3 # classifier
-    parser.add_argument('--lr_2', default=1e-3, type=float, help='sparse coding') # lr_2 = 1e-4  # sparse codeing
+    parser.add_argument('--lr', default=1e-3, type=float, help='sparse coding') # lr = 1e-3 # classifier
+    parser.add_argument('--lr_2', default=1e-4, type=float, help='classifier') # lr_2 = 1e-4  # sparse codeing
     parser.add_argument('--Alpha', default=0.1, type=float, help='bi loss')  # Alpha = 0.1
-    parser.add_argument('--lam1', default=2, type=float, help='cls loss')     # lam1  = 2
-    parser.add_argument('--lam2', default=1, type=float, help='mse loss')   # lam2  = 1
+    parser.add_argument('--lam1', default=1, type=float, help='cls loss')     # lam1  = 2
+    parser.add_argument('--lam2', default=0.5, type=float, help='mse loss')   # lam2  = 1
 
     return parser
 
 def main(args):
     # modelRoot = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/'
     # saveModel = modelRoot + sampling + '/' + mode + '/T36_contrastive_fineTune_fixed/'
-    args.saveModel = args.modelRoot + f"T{args.T}_{args.sampling}_{args.mode}/"
+    args.saveModel = args.modelRoot + f"NUCLA_CV_{args.setup}_{args.sampling}/DIR_cls_ft_{args.mode}/"
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
     print('mode:',args.mode, 'model path:', args.saveModel,  'gpu:', args.gpu_id)
     '============================================= Main Body of script================================================='
@@ -72,36 +73,32 @@ def main(args):
     Drr = torch.from_numpy(Drr).float()
     Dtheta = np.angle(P)
     Dtheta = torch.from_numpy(Dtheta).float()
-
-
     # path_list = './data/CV/' + args.ssetup + '/'
     path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/'
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
     trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
-                               cam='2,1', setup=args.setup,
-                               dataType=args.dataType,
-                               sampling=args.sampling, T=args.T,
-                               maskType=args.maskType)
+                               setup=args.setup, dataType=args.dataType,
+                               sampling=args.sampling, nClip=args.nClip,
+                               T=args.T, maskType=args.maskType)
     trainloader = DataLoader(trainSet, shuffle=True,
                               batch_size=args.bs, num_workers=args.nw)
     testSet = NUCLA_CrossView(root_list=path_list, phase='test',
-                              cam='2,1', setup=args.setup,
-                              dataType=args.dataType,
-                              sampling=args.sampling, T=args.T,
-                              maskType= args.maskType)
+                               setup=args.setup, dataType=args.dataType,
+                               sampling=args.sampling, nClip=args.nClip,
+                               T=args.T, maskType=args.maskType)
     testloader = DataLoader(testSet, shuffle=True,
                             batch_size=args.bs, num_workers=args.nw)
 
     net = contrastiveNet(dim_embed=128, Npole=args.N+1, 
-                         fistaLam=args.lam_f, Inference=True,
-                         Drr=Drr, Dtheta=Dtheta,
-                         dim=2, dataType='2D', 
-                         gpu_id=args.gpu_id,
-                         fineTune=True).cuda(args.gpu_id)
+                         Drr=Drr, Dtheta=Dtheta, fistaLam=args.lam_f,
+                         mode=args.mode, Inference=True,
+                         dataType=args.dataType, dim=2, nClip=args.nClip, 
+                         fineTune=args.finetune, useCL=args.contrastive,
+                         gpu_id=args.gpu_id).cuda(args.gpu_id)
 
     # 'load pre-trained contrastive model'
     #pre_train = modelRoot + sampling + '/' + mode + '/T36_contrastive_fineTune_all/' + '40.pth'        
-    pre_train = './pretrained/' + args.dataset +'/' + args.setup + '/' +args.sampling + '/pretrainedRHdyan_CL.pth'
+    pre_train = 
     state_dict = torch.load(pre_train, map_location=args.map_loc)
     net = load_fineTune_model(state_dict, net)
 
@@ -112,9 +109,14 @@ def main(args):
 
     optimizer = torch.optim.SGD(
             [{'params': filter(lambda x: x.requires_grad,net.backbone.sparseCoding.parameters()),
-              'lr':args.lr_2},
+              'lr':args.lr1},
             {'params': filter(lambda x: x.requires_grad, net.backbone.Classifier.parameters()),
-             'lr': args.lr}], weight_decay=1e-3, momentum=0.9)
+             'lr': args.lr_2}], weight_decay=1e-3, momentum=0.9)
+    optimizer = torch.optim.SGD(
+            [{'params': filter(lambda x: x.requires_grad,net.backbone.sparseCoding.parameters()),
+              'lr':args.lr1},
+            {'params': filter(lambda x: x.requires_grad, net.backbone.Classifier.parameters()),
+             'lr': args.lr_2}], weight_decay=1e-3, momentum=0.9)
 
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 70], gamma=0.1)
     Criterion = torch.nn.CrossEntropyLoss()
@@ -197,7 +199,7 @@ if __name__ == "__main__":
     args.map_loc = "cuda:"+str(args.gpu_id) # map_loc = "cuda:"+str(gpu_id)
     if args.sampling == 'Single':
         # args.nClip = 1
-        args.bs = 60
+        args.bs = 8 # 60
         args.nw = 8
     else:
         # args.nClip = 4

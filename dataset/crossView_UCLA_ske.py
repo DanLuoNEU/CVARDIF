@@ -103,7 +103,6 @@ class NUCLA_CrossView(Dataset):
         # return 13
 
     def get_uniNorm(self, skeleton):
-
         'skeleton: T X 25 x 2, norm[0,1], (x-min)/(max-min)'
         # nonZeroSkeleton = []
         if self.dataType == '2D':
@@ -242,8 +241,9 @@ class NUCLA_CrossView(Dataset):
         return ROIs
 
     def getAffineTransformation(self, skeleton):
-        'X: T x 25 x 2'
-        'For cross-sub, sample rates '
+        ''' For cross-sub, sample rates
+            skeleton: T x 25 x 2',
+        '''
         tx, ty = random.sample(range(-10,10),1)[0], random.sample(range(-10,10),1)[0]
         theta = random.sample(range(-180, 180),1)[0]
         scs = list(np.linspace(0.1, 10, 20))
@@ -395,7 +395,8 @@ class NUCLA_CrossView(Dataset):
 
         if self.maskType == 'binary': visibility = binaryMask
         else:                         visibility = confidence  # mask is from confidence score
-
+        
+        # Invalid data
         if self.T == 0:
             skeleton_input = skeleton
             normSkeleton_input = normSkeleton
