@@ -18,7 +18,6 @@ from torch.optim import lr_scheduler
 from dataset.crossView_UCLA_ske import NUCLA_CrossView
 from modelZoo.BinaryCoding import DyanEncoder, binarizeSparseCode
 from utils import gridRing
-# from test_cls_CV import testing, getPlots
 
 seed = 123
 random.seed(seed)
@@ -32,19 +31,22 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default=f'/data/Dan/202111_CVAR/202410_CVARDIF/',
+    parser.add_argument('--modelRoot', default='exps_should_be_saved_on_HDD',
                         help='the work folder for storing experiment results')
+    parser.add_argument('--path_list', default='', help='')
     parser.add_argument('--cus_n', default='', help='customized name')
     parser.add_argument('--mode', default='dy+bi')
     parser.add_argument('--setup', default='setup1', help='')
+    parser.add_argument('--dataType', default='2D', help='')
     parser.add_argument('--sampling', default='Single', help='')
+    parser.add_argument('--nClip', default=1, type=int, help='') # sampling=='multi' or sampling!='Single'
 
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
     parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.503, type=float) # 0.501/0.503/0.510
+    parser.add_argument('--gumbel_thresh', default=0.505, type=float) # 0.501/0.503/0.510
 
-    parser.add_argument('--gpu_id', default=7, type=int, help='')
+    parser.add_argument('--gpu_id', default=0, type=int, help='')
     parser.add_argument('--bs', default=8, type=int, help='')
     parser.add_argument('--nw', default=8, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
@@ -57,7 +59,8 @@ def get_parser():
 def main(args):
     # Configurations
     ## Paths
-    args.saveModel = args.modelRoot + f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{args.mode}/'
+    args.saveModel = os.path.join(args.modelRoot,
+                                  f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{args.mode}/')
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
     ## Dictionary
     P, Pall = gridRing(args.N)
@@ -66,26 +69,22 @@ def main(args):
     Dtheta = np.angle(P)
     Dtheta = torch.from_numpy(Dtheta).float()
     ## Network
-    ### DYAN: FISTA
-    # net = DyanEncoder(Drr, Dtheta,
-    #                   args.lam_f,
-    #                   args.gpu_id)
-    ### DYAN: FISTA, ReWeighted Heuristic Algorithm, Binarization Module
     net = binarizeSparseCode(num_binary=128, Drr=Drr, Dtheta=Dtheta,
                              gpu_id=args.gpu_id, Inference=False, 
                              fistaLam=args.lam_f)
     net.cuda(args.gpu_id)
-    path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/'
-    # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
+    # Dataset
+    assert args.path_list!='', '!!! NO Dataset Samples LIST !!!'
+    path_list = args.path_list + f"/data/CV/{args.setup}/"
     trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
                                setup=args.setup, dataType=args.dataType,
-                               sampling=args.sampling, nClip=6,
+                               sampling=args.sampling, nClip=args.nClip,
                                T=args.T, maskType='None')
     trainloader = DataLoader(trainSet, shuffle=True,
                              batch_size=args.bs, num_workers=args.nw)
     testSet = NUCLA_CrossView(root_list=path_list, phase='test',
                               setup=args.setup, dataType=args.dataType,
-                              sampling=args.sampling, nClip=6,
+                              sampling=args.sampling, nClip=args.nClip,
                               T=args.T, maskType='None')
     testloader = DataLoader(testSet, shuffle=False,
                             batch_size=args.bs, num_workers=args.nw)
@@ -109,7 +108,7 @@ def main(args):
             # print('sample:', i)
             optimizer.zero_grad()
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
-            t = skeletons.shape[1] # (batch_size x num_clips) x t x dim_joint? x num_joint?
+            t = skeletons.shape[1] # (batch_size x num_clips) x t x num_joint x dim_joint
             input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1) # (batch_size x num_clips) x t x (dim_joint x num_joint)
             ### rh-dyan + bi
             binaryCode, output_skeletons, _ = net(input_skeletons, t, args.gumbel_thresh)
@@ -130,7 +129,7 @@ def main(args):
 
         if epoch % 5 == 0:
             torch.save({'epoch': epoch + 1, 'state_dict': net.state_dict(),
-                        'optimizer': optimizer.state_dict()}, args.saveModel + str(epoch) + '.pth')
+                        'optimizer': optimizer.state_dict()}, args.saveModel +'dir_d_'+ str(epoch) + '.pth')
             with torch.no_grad():
                 ERROR = torch.zeros(testSet.__len__(), 1)
 

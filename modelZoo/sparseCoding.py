@@ -198,11 +198,11 @@ class DyanEncoder(nn.Module):
         w_init = torch.ones(x.shape[0], dict_new.shape[1], x.shape[2])
         while i < 2:
             temp = fista_reweighted(dict_new, x, self.lam, w_init, 100)
-            'for vector:'
+            # 'for vector:'
             w = 1 / (torch.abs(temp) + 1e-2)
             w_init = (w/torch.norm(w)) * dict_new.shape[1]
 
-            'for matrix:'
+            # 'for matrix:'
             # w = torch.pinverse((temp + 1e-2*torch.ones(temp.shape).cuda(self.gpu_id)))
             # w_init = (w/torch.norm(w,'fro')) * (temp.shape[1]*temp.shape[-1])
             # pdb.set_trace()

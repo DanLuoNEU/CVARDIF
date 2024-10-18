@@ -40,7 +40,7 @@ def testing(dataloader, net,
 
             if mode == 'dy+bi+cl':
                 # input_skeletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
-                actPred, _,biCode, _ = net(input_skeletons, bi_thresh=gumbel_thresh)
+                actPred, _,biCode, _ = net(input_skeletons, gumbel_thresh)
             else:
                 # actPred, _ , _= net(input_skeletons, t)
                 actPred, _,_ = net.forward2(input_skeletons, t, keep_index)
@@ -49,20 +49,6 @@ def testing(dataloader, net,
             actPred = torch.mean(actPred, 1)
             pred = torch.argmax(actPred, 1)
 
-
-            # biCode = biCode.reshape(skeletons.shape[0],nClip, biCode.shape[1],biCode.shape[-1])
-            # for b in range(0, biCode.shape[0]):
-            #
-            #     for c in range(0, nClip):
-            #         fig = plt.figure()
-            #         img = plt.imshow(biCode[b,c].detach().cpu().numpy())
-            #         title = 'Clip # '+str(c) + '  pred label:' + str(pred[b].data.item()) + '| gt label:' + str(y[b].data.item())
-            #         plt.title(title)
-            #         fig.colorbar(img)
-            #
-            #         plt.savefig('./logfiles/1107/action' + str(y[b].data.item())+ '_' + 'seq_'+str(b) + '_clip_'+str(c) + '.png')
-            #         plt.close(fig)
-            # print('gt:', gt, 'pred:', pred)
             correct = torch.eq(gt, pred).int()
             count += gt.shape[0]
             pred_cnt += torch.sum(correct).data.item()

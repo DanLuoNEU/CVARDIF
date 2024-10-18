@@ -423,7 +423,6 @@ class NUCLA_CrossView(Dataset):
                 skeleton_input = skeleton[ids_sample, :, :]
                 normSkeleton_input = normSkeleton[ids_sample,:,:]
                 visibility_input = visibility[ids_sample,:,:]
-
                 affineSkeletons_input = affineSkeletons[:,ids_sample,:,:]
 
 
@@ -438,7 +437,7 @@ class NUCLA_CrossView(Dataset):
 
         # # normSkeleton, _ = self.get_uniNorm(skeleton_input)
         # heatmap_to_use = self.pose_to_heatmap(skeleton_input, imgSize, 64)
-
+        # normSkeleton, num_samples
         skeletonData = {'normSkeleton': normSkeleton_input, 'unNormSkeleton': skeleton_input,
                         'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
         # print('heatsize:', heatmap_to_use.shape[0], 'imgsize:', imageSequence_input.shape[0], 'skeleton size:', normSkeleton.shape[0])
@@ -550,12 +549,12 @@ class NUCLA_CrossView(Dataset):
             view, name_sample = self.samples_list[index]
 
         if self.sampling == 'Single':
+            # [T, num_joints, 2]
             skeletons = self.get_data(view, name_sample) 
         else:
-            skeletons = self.get_data_multiSeq(view, name_sample)
-
+            # [nClip, T, num_joints, 2]
+            skeletons = self.get_data_multiSeq(view, name_sample) 
         # output affine skeletons
-
         label_action = self.action_list[name_sample[:3]]
         dicts = {'input_skeletons': skeletons, 'action': label_action,
                  'sample_name':name_sample, 'cam':view}

@@ -176,7 +176,6 @@ class classificationGlobal(nn.Module):
 
         self.conv3 = nn.Conv1d(512, 1024, 3, stride=2, padding=1)
         self.bn3 = nn.BatchNorm1d(num_features=1024, eps=1e-5, affine=True)
-
        
         self.conv4 = nn.Conv2d(self.Npole + 1024, 1024, (3, 1), stride=1, padding=(0, 1))
         self.bn4 = nn.BatchNorm2d(num_features=1024, eps=1e-5, affine=True)
@@ -203,12 +202,17 @@ class classificationGlobal(nn.Module):
         self.fc2 = nn.Linear(1024, 512)
         self.fc3 = nn.Linear(512, 128)
 
-        # self.linear = nn.Sequential(nn.Linear(256*10*2,1024),nn.LeakyReLU(),nn.Linear(1024,512),nn.LeakyReLU(), nn.Linear(512, 128), nn.LeakyReLU())
+        # self.linear = nn.Sequential(nn.Linear(256*10*2,1024),
+        #                             nn.LeakyReLU(),
+        #                             nn.Linear(1024,512),
+        #                             nn.LeakyReLU(),
+        #                             nn.Linear(512, 128),
+        #                             nn.LeakyReLU())
         if self.useCL == False:
             # self.cls = nn.Linear(128, self.num_class)
             self.cls = nn.Sequential(nn.Linear(128,128),
                                      nn.LeakyReLU(),
-                                     nn.Linear(128,self.num_class))
+                                     nn.Linear(128, self.num_class))
         else:
             self.cls = nn.Sequential(nn.Linear(128, self.num_class))
         self.relu = nn.LeakyReLU()
@@ -219,7 +223,6 @@ class classificationGlobal(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
             if isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight,mode='fan_out', nonlinearity='relu' )
-
             elif isinstance(m, nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight, gain=1)
 
@@ -264,7 +267,10 @@ class classificationWBinarization(nn.Module):
         self.dataType = dataType
         self.useCL = useCL
         self.BinaryCoding = binaryCoding(num_binary=self.num_binary)
-        self.Classifier = classificationGlobal(num_class=self.num_class, Npole=Npole,dataType=self.dataType, useCL=self.useCL)
+        self.Classifier = classificationGlobal(num_class=self.num_class,
+                                               Npole=Npole,
+                                               dataType=self.dataType,
+                                               useCL=self.useCL)
 
     def forward(self, x):
         'x is coefficients'
@@ -432,12 +438,12 @@ class Fullclassification(nn.Module):
         T = x.shape[1]
         # ipdb.set_trace()
         if self.useGroup:
-            sparseCode,Dict, _ = self.sparseCoding(x, T)
+            sparseCode, Dict, _ = self.sparseCoding(x, T)
             # print('group lasso reg weights, l1, l2:', self.fistaLam, self.group_reg)
         else:
             sparseCode, Dict, _ = self.sparseCoding(x, T) # w.RH
 
-        'for GUMBEL'
+        # 'for GUMBEL'
         binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, force_hard=True, temperature=0.1, inference=self.Inference)
         temp1 = sparseCode * binaryCode
         # temp = binaryCode.reshape(binaryCode.shape[0], self.Npole, int(x.shape[-1]/self.dim), self.dim)
@@ -582,31 +588,26 @@ class contrastiveNet(nn.Module):
         # if len(x.shape) == 3:
         #     x = x.unsqueeze(0)
         if self.fineTune == False:
-            
             if self.mode == 'rgb':
                 if bz < 2:
-                    x = x.repeat(2, 1, 1, 1, 1,1)
+                    x = x.repeat(2, 1, 1, 1, 1, 1)
                     bz = x.shape[0]
                 x1_img, x2_img = x[:,0], x[:,1]
                 x1_roi, x2_roi = x[:,2], x[:,3]
-
                 _, lastFeat1, _ = self.backbone(x1_img, x1_roi)
                 _, lastFeat2, _ = self.backbone(x2_img, x2_roi)
             else:
+                if_multi = True if x.ndim > 4 else False
                 if bz < 2:
-                    x = x.repeat(2,1,1,1,1)
+                    x = x.repeat(2, 1, 1, 1, 1) if if_multi else x.repeat(2, 1, 1, 1)
                     bz = x.shape[0]
                 # x = x.reshape(x.shape[0]* x.shape[1], x.shape[2], x.shape[3])
-                
                 x1 = x[:,0]
                 x2 = x[:,1]
-                _, lastFeat1,_,_ = self.backbone(x1, y)
-                _, lastFeat2,_,_ = self.backbone(x2, y)
-
+                _, lastFeat1, _, _ = self.backbone(x1, y)
+                _, lastFeat2, _, _ = self.backbone(x2, y)
             embedding1 = self.relu(self.proj(lastFeat1))
             embedding2 = self.relu(self.proj(lastFeat2))
-
-
             embed1 = torch.mean(embedding1.reshape(bz, self.nClip, embedding1.shape[-1]),1)
             embed2 = torch.mean(embedding2.reshape(bz, self.nClip, embedding2.shape[-1]),1)
             z1 = F.normalize(embed1, dim=1)

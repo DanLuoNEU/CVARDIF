@@ -11,8 +11,6 @@ from torch.utils.data import DataLoader
 
 from dataset.crossView_UCLA_ske import os, np, random, NUCLA_CrossView
 from modelZoo.BinaryCoding import Fullclassification, nn, gridRing, classificationWSparseCode
-# from modelZoo.BinaryCoding import classificationWBinarizationRGB, classificationWBinarizationRGBDY
-# from modelZoo.BinaryCoding import contrastiveNet
 from test_cls_CV_DIR import testing, getPlots
 from utils import load_pretrainedModel_endtoEnd
 
@@ -28,8 +26,10 @@ def get_parser():
         else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
     
     parser = argparse.ArgumentParser(description='CVARDIF')
-    parser.add_argument('--modelRoot', default='/data/Dan/202111_CVAR/202410_CVARDIF/',
+    parser.add_argument('--modelRoot', default='exps_should_be_saved_on_HDD',
                         help='the work folder for storing experiment results')
+    parser.add_argument('--path_list', default='', help='')
+    parser.add_argument('--pretrain',  default='', help='')
     parser.add_argument('--cus_n', default='', help='customized name')
     
     parser.add_argument('--dataset', default='NUCLA', help='')
@@ -37,7 +37,7 @@ def get_parser():
     parser.add_argument('--num_class', default=10, type=int, help='')
     parser.add_argument('--dataType', default='2D', help='')
     parser.add_argument('--sampling', default='Single', help='')
-    parser.add_argument('--nClip', default=6, type=int, help='') # sampling=='multi' or sampling!='Single'
+    parser.add_argument('--nClip', default=1, type=int, help='') # sampling=='multi' or sampling!='Single'
     parser.add_argument('--bs', default=8, type=int, help='')
     parser.add_argument('--nw', default=8, type=int, help='')
     
@@ -53,7 +53,7 @@ def get_parser():
     parser.add_argument('--lam_f', default=0.1, type=float)
     parser.add_argument('--gumbel_thresh', default=0.505, type=float) # 0.503
 
-    parser.add_argument('--gpu_id', default=6, type=int, help='')
+    parser.add_argument('--gpu_id', default=0, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
     parser.add_argument('--lr', default=5e-4, type=float, help='sparse coding')
     parser.add_argument('--lr_2', default=1e-3, type=float, help='classifier')
@@ -64,7 +64,8 @@ def get_parser():
     return parser
 
 def main(args):
-    args.saveModel = args.modelRoot + f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_cls_noCL_{args.mode}/'
+    args.saveModel = os.path.join(args.modelRoot,
+                                  f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_cls_noCL_{args.mode}/')
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
     '============================================= Main Body of script================================================='
     P,Pall = gridRing(args.N)
@@ -73,7 +74,8 @@ def main(args):
     Dtheta = np.angle(P)
     Dtheta = torch.from_numpy(Dtheta).float()
     # Dataset
-    path_list = f'/home/dan/ws/202209_CrossView/202409_CVAR_yuexi_lambdaS/data/CV/{args.setup}/' # './data/CV/' + args.setup + '/'
+    assert args.path_list!='', '!!! NO Dataset Sample LIST !!!'
+    path_list = args.path_list + f"/data/CV/{args.setup}/"
     # root_skeleton = '/data/Dan/N-UCLA_MA_3D/openpose_est'
     trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
                                setup=args.setup, dataType=args.dataType,
@@ -90,9 +92,9 @@ def main(args):
 
     if args.mode == 'dy+bi+cl':
         # rhDYAN+bi+cl
-        pretrain = '/home/yuexi/Documents/ModelFile/crossView_NUCLA/Single/rhDYAN_bi/100.pth'
-        print('pretrain:', pretrain)
-        stateDict = torch.load(pretrain, map_location=args.map_loc)['state_dict']
+        assert args.pretrain!='', '!!! NO Pretrained Dictionary !!!'
+        print('pretrain:', args.pretrain)
+        stateDict = torch.load(args.pretrain, map_location=args.map_loc)['state_dict']
         Drr = stateDict['sparseCoding.rr']
         Dtheta = stateDict['sparseCoding.theta']
         # Model
@@ -103,6 +105,7 @@ def main(args):
                                  Inference=True,
                                  dim=2, group=False, group_reg=0).cuda(args.gpu_id)
         # Freeze the Dictionary part
+        net.train()
         net.sparseCoding.rr.requires_grad = False
         net.sparseCoding.theta.requires_grad = False
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()),
@@ -148,6 +151,7 @@ def main(args):
         # net = load_pretrainedModel_endtoEnd(stateDict, net)
         # NOTE: Fixed DYAN poles'
         # ipdb.set_trace()
+        net.train()
         net.sparseCoding.rr.requires_grad = False
         net.sparseCoding.theta.requires_grad = False
     
@@ -161,7 +165,7 @@ def main(args):
     LOSS_CLS = []
     LOSS_MSE = []
     LOSS_BI = []
-    print('Experiment config | setup:',args.setup,'sampling:', args.sampling,
+    print('Experiment config | setup:',args.setup,'sampling:', args.sampling, 'gumbel_thresh:', args.gumbel_thresh,
           '\n\tAlpha(bi):',args.Alpha,'lam1(cls):',args.lam1,'lam2(mse):',args.lam2,
           'lr(mse):',args.lr,'lr_2(cls):',args.lr_2)
     for epoch in range(1, args.Epoch+1):
@@ -242,14 +246,14 @@ def main(args):
             if epoch % 5 ==0 :
                 torch.save({'state_dict': net.state_dict(),
                    'optimizer': optimizer.state_dict()}, 
-                   args.saveModel + f"{epoch}.pth")
+                   args.saveModel + f"dir_cls_noCL_{epoch}.pth")
 
             Acc = testing(testloader, net,
                           args.gpu_id, args.sampling,
                           args.mode, args.withMask,
                           args.gumbel_thresh,
                           keep_index)
-            print('testing epoch:',epoch, 'Acc:%.4f'% Acc)
+            print('testing epoch:',epoch, f'Acc: {Acc*100:.4f}%')
             ACC.append(Acc)
         
     torch.cuda.empty_cache()
@@ -259,25 +263,5 @@ if __name__ == "__main__":
     parser = get_parser()
     args=parser.parse_args()
     args.map_loc = "cuda:"+str(args.gpu_id)
-    if args.sampling != 'Single':
-        args.bs = 4
-        args.nw = 4
-    if args.RHdyan:
-        if args.maskType == 'binary':
-            args.dy_pretrain = './pretrained/N-UCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_BI_mask.pth'  # binary mask
-        elif args.maskType == 'score':
-            args.dy_pretrain = './pretrained/N-UCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_BI_score.pth'
-        else:
-            # dy_pretrain = './pretrained/NUCLA/' + setup + '/' + sampling +'/pretrainedRHdyan_noCL.pth'
-           args.dy_pretrain = './pretrained/NUCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_noCL_v2.pth'
-    else:
-        args.dy_pretrain = './pretrained/N-UCLA/' + args.setup + '/' + args.sampling + '/pretrainedDyan_BI.pth'
-    
-    # if args.RHdyan:
-    #     # args.dy_pretrain = './pretrained/NUCLA/' + args.setup + '/' + args.sampling + '/pretrainedRHdyan_noCL_v2.pth'
-    #     args.dy_pretrain = os.path.join(args.modelRoot, f"NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{args.mode[:-3]}/5.pth")
-    # else:
-    #     args.dy_pretrain = ''
-    # print(f"dy_pretrain Model: {args.dy_pretrain}")
     
     main(args)
