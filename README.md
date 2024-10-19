@@ -5,7 +5,7 @@
 - PyTorch=1.6.0
 
 ## Dataset:
-[Northwestern-UCLA Multiview Action 3D Dataset(NUCLA)](https://wangjiangb.github.io/my_data.html)
+[Northwestern-UCLA Multiview Action 3D Dataset(NUCLA)](https://wangjiangb.github.io/my_data.html) \
 [List]() for Cross View setup.
 
 ## Training:
@@ -14,21 +14,21 @@ Pretrained Dictionary for step 1: [link](https://northeastern-my.sharepoint.com/
 
 1. DIR-Dictionary(1145MiB GRAM)
 
-    `bash    
+    ```bash    
         python train_DIR_D_NUCLA.py --modelRoot /dir/to/save --path_list /dir/to/data
-    `
+    ```
 2. DIR-Classification(1107MiB GRAM)
 
-    `bash    
+    ```bash    
         python train_DIR_cls_noCL_NUCLA.py --modelRoot /dir/to/save --path_list /dir/to/data --pretrain /path/to/model
-    `
+    ```
 3. DIR-Contrastive Learning
 
-    `bash    
+    ```bash    
         python train_DIR_cls_wiCL_NUCLA.py --modelRoot /dir/to/save --path_list /dir/to/data --pretrain /path/to/model
-    `
+    ```
 4. DIR-Finetune(1023MiB GRAM)
 
-    `bash    
+    ```bash    
         python train_DIR_cls_ft_NUCLA.py --modelRoot /dir/to/save --path_list /dir/to/data --pretrain /path/to/model
-    `
+    ```
