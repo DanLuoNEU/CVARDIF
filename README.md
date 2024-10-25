@@ -1,4 +1,4 @@
-# DIR source code for CVAR
+# Official Implementation for CVAR
 
 ## Environment
 - python=3.7
@@ -31,3 +31,7 @@ Almost all hyperparameters included as default values(Now only support **NUCLA**
     ```bash    
         python train_DIR_cls_ft_NUCLA.py --modelRoot /dir/to/save --path_list /dir/to/data --pretrain /path/to/model
     ```
+
+## Human Interaction Recognition experiment can be found: 
+    https://github.com/DanLuoNEU/Skeleton-based_Interactive_Action_Recognition_via_Dynamics
+    
