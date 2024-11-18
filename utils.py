@@ -12,6 +12,11 @@ random.seed(0)
 torch.manual_seed(0)
 np.random.seed(0)
 
+# PyTorch 1.6.0
+def sparsity(n, thr_zero=0.05):
+    m = n.clone().detach()
+    return 1.0-torch.tensor(m!=0).sum().float()/torch.tensor(m.numel()).float(), \
+           1.0-torch.tensor(torch.abs(m).ge(thr_zero)).sum().float()/torch.tensor(m.numel()).float()
 
 def weightPoles(c_array, Drr, Dtheta, dictionary):
     c_array = c_array.cpu().numpy()

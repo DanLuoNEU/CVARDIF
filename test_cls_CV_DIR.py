@@ -1,3 +1,4 @@
+from einops import rearrange
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
@@ -17,35 +18,18 @@ def testing(dataloader, net,
         for i, sample in enumerate(dataloader):
             # print('sample:', i)
             skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(gpu_id)
-            visibility = sample['input_skeletons']['visibility'].float().cuda(gpu_id)
-
             gt = sample['action'].cuda(gpu_id)
-            bz = skeletons.shape[0]
-            if sampling == 'Single':
-                t = skeletons.shape[1]
-                nClip = 1
-                input_skeletons = skeletons.reshape(skeletons.shape[0], t, -1)  # bz, T, 25, 2
-                input_mask = visibility.reshape(visibility.shape[0], t, -1)
-            else:
-                t = skeletons.shape[2]
-                input_skeletons = skeletons.reshape(skeletons.shape[0], skeletons.shape[1], t, -1)  # bz,clip, T, 25, 2 --> bz*clip, T, 50
-                input_mask = visibility.reshape(visibility.shape[0]*visibility.shape[1], t, -1)
-                nClip = skeletons.shape[1]
 
-            if withMask:
-                input_skeletons = input_skeletons.unsqueeze(-1)
-                input_mask = input_mask.unsqueeze(-1)
-            else:
-                input_mask = torch.ones(1).cuda(gpu_id)
-
+            Nsample, nClip, t = skeletons.shape[0], skeletons.shape[1], skeletons.shape[2]
+            input_skeletons =rearrange(skeletons, 'b c t n d -> (b c) t (n d)')
             if mode == 'dy+bi+cl':
                 # input_skeletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
-                actPred, _,biCode, _ = net(input_skeletons, gumbel_thresh)
+                actPred, _,biCode, _,_ = net(input_skeletons, gumbel_thresh)
             else:
                 # actPred, _ , _= net(input_skeletons, t)
                 actPred, _,_ = net.forward2(input_skeletons, t, keep_index)
 
-            actPred = actPred.reshape(skeletons.shape[0], nClip, actPred.shape[-1])
+            actPred = actPred.reshape(Nsample, nClip, actPred.shape[-1])
             actPred = torch.mean(actPred, 1)
             pred = torch.argmax(actPred, 1)
 

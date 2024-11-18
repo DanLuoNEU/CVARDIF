@@ -18,7 +18,7 @@ from torch.optim import lr_scheduler
 # from dataset.crossView_UCLA import NUCLA_CrossView
 from dataset.crossView_UCLA_ske import NUCLA_CrossView
 from modelZoo.BinaryCoding import DyanEncoder, binarizeSparseCode
-from utils import sparsity, gridRing
+from utils import gridRing
 
 seed = 123
 random.seed(seed)
@@ -62,8 +62,8 @@ def main(args):
     os.system('date')
     # Configurations
     ## Paths
-    args.bs_t = 64
-    str_conf = f"{'wiRH' if args.wiRH else 'woRH'}"
+    args.bs_t = 1
+    str_conf = f"{'wiRH' if args.wiRH else 'woRH'} "
     print(f" {args.mode} | {str_conf} | Batch Size: Train {args.bs} | Test {args.bs_t} ")
     print(f"\tlam_f: {args.lam_f} | Alpha: {args.Alpha} | lam2: {args.lam2} | lr_2: {args.lr_2} | g_t: {args.gumbel_thresh}")
     args.saveModel = os.path.join(args.modelRoot,
@@ -108,7 +108,9 @@ def main(args):
         print('training epoch:', epoch)
         net.train()
 
-        lossVal,lossMSE, lossL1 = [], [], []
+        lossVal = []
+        lossMSE = []
+        lossL1 = []
         mseB = []
         start_time = time.time()
         for _, sample in enumerate(trainloader):
@@ -123,16 +125,16 @@ def main(args):
                                                        args.gumbel_thresh,
                                                        False)
             target_coeff = torch.zeros_like(binaryCode).cuda(args.gpu_id)
-            loss = args.lam2*mseLoss(output_skeletons, input_skeletons
+            loss = args.lam2*mseLoss(R_B, input_skeletons
                     ) + args.Alpha*l1Loss(binaryCode,target_coeff)
             #### BP and Log
             loss.backward()
             optimizer.step()
             # ipdb.set_trace()
-            lossMSE.append((args.lam2*mseLoss(output_skeletons, input_skeletons)).detach().item())
-            lossL1.append((args.Alpha*l1Loss(binaryCode,target_coeff)).detach().item())
-            mseB.append((args.lam2*mseLoss(R_B, input_skeletons)).detach().item())
-            lossVal.append(loss.detach().item())
+            lossMSE.append(args.lam2*mseLoss(output_skeletons, input_skeletons).data.item())
+            lossL1.append(args.Alpha*l1Loss(binaryCode,target_coeff).data.item())
+            mseB.append(args.lam2*mseLoss(R_B, input_skeletons).data.item())
+            lossVal.append(loss.data.item())
         end_time = time.time()
         # print('epoch:', epoch, 'loss:', np.mean(np.asarray(lossVal)), 'time(h):', (end_time - start_time) / 3600)
         print('Train epoch:', epoch, 'mse loss:', np.mean(np.asarray(lossMSE)),
@@ -146,29 +148,23 @@ def main(args):
             net.eval()
             with torch.no_grad():
 
-                ERROR,ERROR_B = [], []
-                Sp_0, Sp_th = [],[]
+                ERROR = []
+                ERROR_B = []
                 for _, sample in enumerate(testloader):
                     # batch_size, num_clips, t, num_joint, dim_joint
                     skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
                     # -> batch_size x num_clips, t, num_joint x dim_joint
                     input_skeletons = rearrange(skeletons, 'n c t j d -> (n c) t (j d)')
-                    C, output_skeletons, _, R_B = net(input_skeletons,
+                    _, output_skeletons, _, R_B = net(input_skeletons,
                                                     args.gumbel_thresh,
                                                     True)
                     error   = args.lam2*mseLoss(output_skeletons, input_skeletons).cpu()
                     error_b = args.lam2*mseLoss(R_B, input_skeletons).cpu()
                     ERROR.append(error)
                     ERROR_B.append(error_b) 
-                    sp_0,sp_th =sparsity(C)  
-                    Sp_0.append(sp_0)
-                    Sp_th.append(sp_th)
 
-                print('Test epoch:', epoch, f'MSE_Y_C:{torch.mean(torch.tensor(ERROR))}', 
+                print('epoch(Test):', epoch, f'MSE_Y_C:{torch.mean(torch.tensor(ERROR))}', 
                                              f'MSE_Y_B:{torch.mean(torch.tensor(ERROR_B))}')
-                print(f'\tSp_0:{torch.mean(torch.tensor(Sp_0))}', 
-                      f'Sp_th:{torch.mean(torch.tensor(Sp_th))}')
-                
 
         scheduler.step()
     print('done')

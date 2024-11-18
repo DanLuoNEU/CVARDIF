@@ -121,44 +121,32 @@ class binaryCoding(nn.Module):
         return x
 
 class binarizeSparseCode(nn.Module):
-    def __init__(self, num_binary, Drr, Dtheta, gpu_id, Inference, fistaLam):
+    def __init__(self, Drr, Dtheta, T, wiRH,
+                 gpu_id, Inference=True, fistaLam=0.1):
         super(binarizeSparseCode, self).__init__()
-        self.k = num_binary
         self.Drr = Drr
         self.Dtheta = Dtheta
         self.Inference = Inference
         self.gpu_id = gpu_id
         self.fistaLam = fistaLam
-        # self.sparsecoding = sparseCodingGenerator(self.Drr, self.Dtheta, self.PRE, self.gpu_id)
-        # self.BinaryCoding = binaryCoding(num_binary=self.k)
-        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta,
+        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, T, wiRH,
                                         lam=fistaLam,
                                         gpu_id=self.gpu_id)
         self.BinaryCoding = GumbelSigmoid()
 
-    def forward(self, x, T, bi_thresh):
-        # # Regular DYAN
-        # sparseCode, Dict, _ = self.sparseCoding.forward2(x, T) 
-        # sparseCode = sparseCode.permute(2,1,0).unsqueeze(3)
-        # # sparseCode = sparseCode.reshape(1, T, 20, 2)
-        # binaryCode = self.binaryCoding(sparseCode)
-        # reconstruction = torch.matmul(Dict, sparseCode)
-        # RHdyan + Gumbel
-        sparseCode, Dict, _ = self.sparseCoding(x, T) 
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
-                                       force_hard=True, inference=self.Inference)
-        temp = sparseCode*binaryCode
-        reconstruction = torch.matmul(Dict, temp)
-        
-        return binaryCode, reconstruction, sparseCode
-    
-    def prediction(self,x,FRA,PRE, bi_thresh):
-        pred, sparseCode, dict= self.sparseCoding.prediction(x, FRA, PRE)
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
-                                       force_hard=True, inference=self.Inference)
-        pred = torch.matmul(dict, binaryCode*sparseCode)
 
-        return binaryCode, pred
+    def forward(self, x, bi_thresh, inference=True):
+        # DYAN encoding
+        sparseCode, Dict, _ = self.sparseCoding(x)
+        R = torch.matmul(Dict, sparseCode)
+        # Gumbel
+        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+                                       force_hard=True, inference=inference)
+        temp = sparseCode*binaryCode
+        R_B = torch.matmul(Dict, temp)
+        
+        return binaryCode, R, sparseCode, R_B
+
 
 class classificationGlobal(nn.Module):
     def __init__(self, num_class, Npole, dataType, useCL):
@@ -392,68 +380,49 @@ class classificationWBinarizationRGBDY(nn.Module):
     
 
 class Fullclassification(nn.Module):
-    def __init__(self, num_class,
-                 Npole, Drr, Dtheta,
-                 dim, dataType, Inference, gpu_id, 
-                 fistaLam, useCL,
-                 group, group_reg):
+    def __init__(self, Drr, Dtheta, T, wiRH,
+                 fistaLam, gpu_id,
+                 num_class, Npole,
+                 dataType, useCL, 
+                 Inference):
         super(Fullclassification, self).__init__()
-        self.num_class = num_class
-        self.Npole = Npole
-        # self.bi_thresh = 0.505
-        self.num_binary = Npole
+        # DYAN
         self.Drr = Drr
         self.Dtheta = Dtheta
-        self.Inference = Inference
-        self.gpu_id = gpu_id
-        self.dim = dim
-        self.useCL = useCL
-        self.dataType = dataType
-        self.useGroup = group
+        self.T = T
         self.fistaLam = fistaLam
-        # self.BinaryCoding = binaryCoding(num_binary=self.num_binary)
-        self.groups = np.linspace(0, 160, 161, dtype=np.int)
-        self.group_reg = group_reg
-        self.group_regs = torch.ones(len(self.groups)) * self.group_reg
-
+        self.gpu_id = gpu_id
+        # Gumbel
+        # self.bi_thresh = 0.505
+        # Classifier
+        self.num_class = num_class
+        self.Npole = Npole
+        self.dataType = dataType
+        self.useCL = useCL
+        # Networks
+        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, T, wiRH,
+                                        lam=fistaLam, gpu_id=self.gpu_id,
+                                        freezeD=True)
+        self.Inference = Inference
         self.BinaryCoding = GumbelSigmoid()
-
-        # """Group LASSO"""
-        # if self.useGroup:
-        #     self.sparseCoding = GroupLassoEncoder(self.Drr, self.Dtheta, self.fistaLam, self.groups, self.group_regs,
-        #                                          self.gpu_id)
-        #     # self.sparseCoding = MaskDyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
-        # else:
-        #     self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
-        
-        self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, lam=fistaLam, gpu_id=self.gpu_id)
         self.Classifier = classificationGlobal(num_class=self.num_class,
                                                Npole=self.Npole,
                                                dataType=self.dataType,
                                                useCL=self.useCL)
 
     def forward(self, x, bi_thresh):
-        # sparseCode, Dict, R = self.sparseCoding.forward2(x, T) # w.o. RH
-        # bz, dims = x.shape[0], x.shape[-1]
-        T = x.shape[1]
-        # ipdb.set_trace()
-        if self.useGroup:
-            sparseCode, Dict, _ = self.sparseCoding(x, T)
-            # print('group lasso reg weights, l1, l2:', self.fistaLam, self.group_reg)
-        else:
-            sparseCode, Dict, _ = self.sparseCoding(x, T) # w.RH
-
-        # 'for GUMBEL'
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, force_hard=True, temperature=0.1, inference=self.Inference)
+        # DYAN
+        sparseCode, Dict, R_C = self.sparseCoding(x) # w.RH
+        # Gumbel
+        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+                                       force_hard=True, inference=self.Inference)
+        # Classifier
+        label, lastFeat = self.Classifier(binaryCode)
         temp1 = sparseCode * binaryCode
-        # temp = binaryCode.reshape(binaryCode.shape[0], self.Npole, int(x.shape[-1]/self.dim), self.dim)
-        Reconstruction = torch.matmul(Dict, temp1)
-        sparseFeat = binaryCode
-        # sparseFeat = torch.cat((binaryCode, sparseCode),1)
-        label, lastFeat = self.Classifier(sparseFeat)
-        # print('sparseCode:', sparseCode)
+        R_B = torch.matmul(Dict, temp1)
 
-        return label, lastFeat, binaryCode, Reconstruction
+        return label, lastFeat, binaryCode, R_C, R_B
+
 
 class fusionLayers(nn.Module):
     def __init__(self, num_class, in_chanel_x, in_chanel_y):

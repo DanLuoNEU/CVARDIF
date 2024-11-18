@@ -3,3 +3,5 @@
 __pycache__/
 scripts.log
 pretrained/
+notes_exp/
+figures/torch_graphs
