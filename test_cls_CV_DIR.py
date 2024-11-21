@@ -9,7 +9,7 @@ from utils import gridRing
 
 def testing(dataloader, net,
             gpu_id, sampling, mode, 
-            withMask, gumbel_thresh,
+            withMask,
             keep_index):
     count = 0
     pred_cnt = 0
@@ -24,7 +24,7 @@ def testing(dataloader, net,
             input_skeletons =rearrange(skeletons, 'b c t n d -> (b c) t (n d)')
             if mode == 'dy+bi+cl':
                 # input_skeletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
-                actPred, _,biCode, _,_ = net(input_skeletons, gumbel_thresh)
+                actPred, _,biCode, _,_ = net(input_skeletons)
             else:
                 # actPred, _ , _= net(input_skeletons, t)
                 actPred, _,_ = net.forward2(input_skeletons, t, keep_index)

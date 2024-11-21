@@ -45,11 +45,12 @@ def get_parser():
 
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
-    parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.505, type=float) # 0.501/0.503/0.510
+    parser.add_argument('--lam_f', default=0.01, type=float)
+    parser.add_argument('--g_th', default=0.501, type=float) # 0.501/0.503/0.510
+    parser.add_argument('--g_te', default=0.1, type=float)
 
     parser.add_argument('--gpu_id', default=0, type=int, help='')
-    parser.add_argument('--bs', default=8, type=int, help='')
+    parser.add_argument('--bs', default=64, type=int, help='')
     parser.add_argument('--nw', default=8, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
     parser.add_argument('--Alpha', default=5e-1, type=float, help='bi loss')
@@ -65,7 +66,8 @@ def main(args):
     args.bs_t = 64
     str_conf = f"{'wiRH' if args.wiRH else 'woRH'}"
     print(f" {args.mode} | {str_conf} | Batch Size: Train {args.bs} | Test {args.bs_t} ")
-    print(f"\tlam_f: {args.lam_f} | Alpha: {args.Alpha} | lam2: {args.lam2} | lr_2: {args.lr_2} | g_t: {args.gumbel_thresh}")
+    print(f"\t lam_f: {args.lam_f} | g_th: {args.g_th} | g_te: {args.g_te}")
+    print(f"\t Alpha: {args.Alpha} | lam2: {args.lam2} | lr_2: {args.lr_2}")
     args.saveModel = os.path.join(args.modelRoot,
                                   f"NUCLA_CV_{args.setup}_{args.sampling}/DIR_D_{str_conf}/")
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
@@ -77,7 +79,8 @@ def main(args):
     Dtheta = torch.from_numpy(Dtheta).float()
     ## Network
     net = binarizeSparseCode(Drr, Dtheta, args.T, args.wiRH,
-                             args.gpu_id, Inference=False, 
+                             args.gpu_id,
+                             args.g_th, args.g_te, Inference=False,
                              fistaLam=args.lam_f)
     net.cuda(args.gpu_id)
     # Dataset
@@ -119,9 +122,7 @@ def main(args):
             # -> batch_size x num_clips, t, num_joint x dim_joint
             input_skeletons = rearrange(skeletons, 'n c t j d -> (n c) t (j d)')
             ### rh-dyan + bi
-            binaryCode, output_skeletons, _, R_B = net(input_skeletons,
-                                                       args.gumbel_thresh,
-                                                       False)
+            binaryCode, output_skeletons, _, R_B = net(input_skeletons, False)
             target_coeff = torch.zeros_like(binaryCode).cuda(args.gpu_id)
             loss = args.lam2*mseLoss(output_skeletons, input_skeletons
                     ) + args.Alpha*l1Loss(binaryCode,target_coeff)
@@ -153,14 +154,12 @@ def main(args):
                     skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
                     # -> batch_size x num_clips, t, num_joint x dim_joint
                     input_skeletons = rearrange(skeletons, 'n c t j d -> (n c) t (j d)')
-                    C, output_skeletons, _, R_B = net(input_skeletons,
-                                                    args.gumbel_thresh,
-                                                    True)
+                    C, output_skeletons, _, R_B = net(input_skeletons, True)
                     error   = args.lam2*mseLoss(output_skeletons, input_skeletons).cpu()
                     error_b = args.lam2*mseLoss(R_B, input_skeletons).cpu()
                     ERROR.append(error)
-                    ERROR_B.append(error_b) 
-                    sp_0,sp_th =sparsity(C)  
+                    ERROR_B.append(error_b)
+                    sp_0,sp_th =sparsity(C)
                     Sp_0.append(sp_0)
                     Sp_th.append(sp_th)
 
@@ -168,7 +167,6 @@ def main(args):
                                              f'MSE_Y_B:{torch.mean(torch.tensor(ERROR_B))}')
                 print(f'\tSp_0:{torch.mean(torch.tensor(Sp_0))}', 
                       f'Sp_th:{torch.mean(torch.tensor(Sp_th))}')
-                
 
         scheduler.step()
     print('done')

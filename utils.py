@@ -12,6 +12,17 @@ random.seed(0)
 torch.manual_seed(0)
 np.random.seed(0)
 
+def spectral_norm_svd(A):
+    """
+    Compute the spectral norm of a matrix using SVD.
+    :param A: Input matrix (torch.Tensor of shape [m, n])
+    :return: Spectral norm (largest singular value)
+    """
+    # Perform SVD decomposition
+    _, S, _ = torch.svd(A)
+    # The largest singular value is the spectral norm
+    return S.max()
+
 # PyTorch 1.6.0
 def sparsity(n, thr_zero=0.05):
     m = n.clone().detach()

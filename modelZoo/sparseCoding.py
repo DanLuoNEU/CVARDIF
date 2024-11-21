@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from utils import random
+from utils import random, spectral_norm_svd
 # from modelZoo.actHeat import imageFeatureExtractor
 
 random.seed(123)
@@ -40,7 +40,8 @@ def fista_new(D, Y, lambd, maxIter, gpu_id):
         Y: ((batch_size x num_clips), T, num_joints x dim_joints)
     """
     DtD = torch.matmul(torch.t(D),D)
-    L = torch.norm(DtD,2)
+    # L = torch.norm(DtD,2)
+    L = spectral_norm_svd(DtD)
     linv = 1/L
     DtY = torch.matmul(torch.t(D),Y)
     x_old = torch.zeros(DtD.shape[1],DtY.shape[2]).cuda(gpu_id)
@@ -86,7 +87,15 @@ def fista_reweighted(D, Y, lambd, w, maxIter):
     else:
         DtD = torch.matmul(D.permute(0, 2, 1), D)
         DtY = torch.matmul(D.permute(0, 2, 1), Y)
-    L = torch.norm(DtD, 2) #spectral norm/largest singular value of DtD
+    # Spectral norm/largest singular value of DtD
+    # Option 1: PyTorch < 1.9.0
+    L = spectral_norm_svd(DtD)
+    # Option 2: PyTorch >=1.9.0
+    # L = torch.linalg.norm(DtD, ord=2)
+
+    # # Here uses a highly optimized algorithm to estimate the largest singular value instead
+    # # Ensure DtD is not rank-deficient or ill-conditioned, otherwise, this can lead to differences in results
+    # L = torch.norm(DtD, 2) # element-wise norm
     Linv = 1/L
     weightedLambd = (w*lambd) * Linv.data.item()
     x_old = torch.zeros(DtD.shape[1], DtY.shape[2]).to(D.device)
@@ -165,7 +174,8 @@ class DyanEncoder(nn.Module):
             # Matrix-wise
             # w_init = (w/torch.norm(w, dim=(1,2)).view(-1,1,1)) * Npole
             # Column-wise for Coefficients
-            w_init = (w/torch.norm(w, dim=(1)).view(Nsample,1,-1)) * Npole
+            # w_init = (w/torch.norm(w, dim=(1)).view(Nsample,1,-1)) * Npole # norm 2
+            w_init = (w/torch.norm(w, p=1, dim=(1)).view(Nsample,1,-1)) * Npole # norm 1
             
             final = temp
             del temp

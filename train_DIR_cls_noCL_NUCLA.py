@@ -51,7 +51,8 @@ def get_parser():
     parser.add_argument('--T', default=36, type=int, help='')
     parser.add_argument('--N', default=80*2, type=int, help='')
     parser.add_argument('--lam_f', default=0.1, type=float)
-    parser.add_argument('--gumbel_thresh', default=0.505, type=float) # 0.503
+    parser.add_argument('--g_th', default=0.501, type=float) # 0.503
+    parser.add_argument('--g_te', default=0.1, type=float)
 
     parser.add_argument('--gpu_id', default=0, type=int, help='')
     parser.add_argument('--Epoch', default=100, type=int, help='')
@@ -66,7 +67,10 @@ def get_parser():
 def main(args):
     str_conf = f"{'wiRH' if args.wiRH else 'woRH'} "
     print(f" {args.mode} | {str_conf} | Batch Size: Train {args.bs} | Test {args.bs} ")
-    print(f"\tlam_f: {args.lam_f} | Alpha: {args.Alpha} | lam2: {args.lam2} | lr_2: {args.lr_2} | g_t: {args.gumbel_thresh}")
+    print(f"\tlam_f: {args.lam_f} | g_th: {args.g_th} | g_te: {args.g_te}")
+    print('Experiment config | setup:',args.setup,'sampling:', args.sampling,
+          '\n\tAlpha(bi):',args.Alpha,'lam1(cls):',args.lam1,'lam2(mse):',args.lam2,
+          'lr(mse):',args.lr,'lr_2(cls):',args.lr_2)
     args.saveModel = os.path.join(args.modelRoot,
                                   f'NUCLA_CV_{args.setup}_{args.sampling}/DIR_cls_noCL_{str_conf}/')
     if not os.path.exists(args.saveModel): os.makedirs(args.saveModel)
@@ -102,7 +106,8 @@ def main(args):
         Dtheta = stateDict['sparseCoding.theta']
         # Model
         net = Fullclassification(Drr, Dtheta, args.T, args.wiRH,
-                                 args.lam_f, args.gpu_id,
+                                 args.lam_f, args.g_th, args.g_te,
+                                 args.gpu_id,
                                  args.num_class, args.N+1, 
                                  args.dataType, useCL=False,
                                  Inference=True).cuda(args.gpu_id)
@@ -148,9 +153,6 @@ def main(args):
     LOSS_CLS = []
     LOSS_MSE = []
     LOSS_BI = []
-    print('Experiment config | setup:',args.setup,'sampling:', args.sampling, 'gumbel_thresh:', args.gumbel_thresh,
-          '\n\tAlpha(bi):',args.Alpha,'lam1(cls):',args.lam1,'lam2(mse):',args.lam2,
-          'lr(mse):',args.lr,'lr_2(cls):',args.lr_2)
     for epoch in range(1, args.Epoch+1):
         print('start training epoch:', epoch)
         # net.train()
@@ -170,7 +172,7 @@ def main(args):
             input_skeletons =rearrange(skeletons, 'b c t n d -> (b c) t (n d)')
             if args.mode == 'dy+bi+cl':
                 keep_index = None
-                actPred, _, binaryCode, output_skeletons, _ = net(input_skeletons, args.gumbel_thresh) 
+                actPred, _, binaryCode, output_skeletons, _ = net(input_skeletons) 
                 actPred = actPred.reshape(Nsample, nClip, args.num_class)
                 actPred = torch.mean(actPred, 1)
                 
@@ -216,7 +218,6 @@ def main(args):
             Acc = testing(testloader, net,
                           args.gpu_id, args.sampling,
                           args.mode, args.withMask,
-                          args.gumbel_thresh,
                           keep_index)
             print('testing epoch:',epoch, f'Acc: {Acc*100:.4f}%')
             ACC.append(Acc)

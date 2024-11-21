@@ -122,10 +122,14 @@ class binaryCoding(nn.Module):
 
 class binarizeSparseCode(nn.Module):
     def __init__(self, Drr, Dtheta, T, wiRH,
-                 gpu_id, Inference=True, fistaLam=0.1):
+                 gpu_id,
+                 g_th, g_te, Inference=True,
+                 fistaLam=0.1):
         super(binarizeSparseCode, self).__init__()
         self.Drr = Drr
         self.Dtheta = Dtheta
+        self.g_th = g_th
+        self.g_te = g_te
         self.Inference = Inference
         self.gpu_id = gpu_id
         self.fistaLam = fistaLam
@@ -135,12 +139,12 @@ class binarizeSparseCode(nn.Module):
         self.BinaryCoding = GumbelSigmoid()
 
 
-    def forward(self, x, bi_thresh, inference=True):
+    def forward(self, x, inference=True):
         # DYAN encoding
         sparseCode, Dict, _ = self.sparseCoding(x)
         R = torch.matmul(Dict, sparseCode)
         # Gumbel
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+        binaryCode = self.BinaryCoding(sparseCode**2, self.g_th, temperature=self.g_te,
                                        force_hard=True, inference=inference)
         temp = sparseCode*binaryCode
         R_B = torch.matmul(Dict, temp)
@@ -381,7 +385,8 @@ class classificationWBinarizationRGBDY(nn.Module):
 
 class Fullclassification(nn.Module):
     def __init__(self, Drr, Dtheta, T, wiRH,
-                 fistaLam, gpu_id,
+                 fistaLam, g_th, g_te,
+                 gpu_id,
                  num_class, Npole,
                  dataType, useCL, 
                  Inference):
@@ -391,6 +396,8 @@ class Fullclassification(nn.Module):
         self.Dtheta = Dtheta
         self.T = T
         self.fistaLam = fistaLam
+        self.g_th = g_th
+        self.g_te = g_te
         self.gpu_id = gpu_id
         # Gumbel
         # self.bi_thresh = 0.505
@@ -410,11 +417,11 @@ class Fullclassification(nn.Module):
                                                dataType=self.dataType,
                                                useCL=self.useCL)
 
-    def forward(self, x, bi_thresh):
+    def forward(self, x):
         # DYAN
         sparseCode, Dict, R_C = self.sparseCoding(x) # w.RH
         # Gumbel
-        binaryCode = self.BinaryCoding(sparseCode**2, bi_thresh, temperature=0.1,
+        binaryCode = self.BinaryCoding(sparseCode**2, self.g_th, temperature=self.g_te,
                                        force_hard=True, inference=self.Inference)
         # Classifier
         label, lastFeat = self.Classifier(binaryCode)
