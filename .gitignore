@@ -1,7 +1,7 @@
-.vscode/
-**/__pycache__/
-__pycache__/
-scripts.log
-pretrained/
-notes_exp/
-figures/torch_graphs
+/__pycache__/
+/.vscode/
+/data/synB
+/exps_should_be_saved_on_HDD/
+/notes_exp/*
+!/notes_exp/notes_exp.md
+# /recycle/

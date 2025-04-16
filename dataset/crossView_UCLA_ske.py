@@ -6,14 +6,12 @@ sys.path.append('.')
 import os
 import numpy as np
 import random
-from PIL import Image, ImageFilter, ImageEnhance
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-from dataset.dataUtils import GaussianBlur, getJsonData, alignDataList
-from utils import Gaussian, DrawGaussian
+from dataset.dataUtils import getJsonData, alignDataList
 
 random.seed(0)
 np.random.seed(0)
@@ -31,49 +29,56 @@ class NUCLA_CrossView(Dataset):
         Access input skeleton sequence, GT label
         When T=0, it returns the whole
     """
-    def __init__(self, root_list, dataType, sampling, phase, T, maskType, setup, nClip):
-        self.root_list = root_list
+    def __init__(self, root_list, phase,
+                 dataType, setup,
+                 sampling, nClip, T,
+                 maskType):
         self.data_root = '/data/N-UCLA_MA_3D/multiview_action'
-        self.dataType = dataType
-        self.sampling = sampling
+        self.root_list = root_list
         self.phase = phase
-        self.T = T
-        self.ds = 2
-        self.clips = nClip
-        self.maskType = maskType
-        cam = '1,2,3' 
+        
+        self.dataType = dataType
         if self.dataType == '2D':
             self.root_skeleton = '/data/N-UCLA_MA_3D/openpose_est'
         else:
             self.root_skeleton = '/data/N-UCLA_MA_3D/VideoPose3D_est/3d_est'
-        self.view = []
+        # Cross View Setup
         if setup == 'setup1':       self.test_view = 'view_3'
         elif setup == 'setup2':     self.test_view = 'view_2'
         else:                       self.test_view = 'view_1'
+        self.view = []
+        cam = '1,2,3' 
         for name_cam in cam.split(','): 
             if name_cam in self.test_view: continue
             self.view.append('view_' + name_cam)
 
-        self.num_samples = 0
         self.num_action = 10
         self.action_list = {'a01': 0, 'a02': 1, 'a03': 2, 'a04': 3, 'a05': 4,
                             'a06': 5, 'a08': 6, 'a09': 7, 'a11': 8, 'a12': 9}
-        self.actions = {'a01': 'pick up with one hand', 'a02': "pick up with two hands", 'a03': "drop trash",
-                        'a04': "walk around", 'a05': "sit down",
-                        'a06': "stand up", 'a08': "donning", 'a09': "doffing", 'a11': "throw", 'a12': "carry"}
+        self.actions = {'a01': 'pick up with one hand', 'a02': "pick up with two hands",
+                        'a03': "drop trash", 'a04': "walk around",
+                        'a05': "sit down", 'a06': "stand up",
+                        'a08': "donning", 'a09': "doffing",
+                        'a11': "throw", 'a12': "carry"}
         self.actionId = list(self.action_list.keys())
         # Get the list of files according to cam and phase
-        self.test_list = []
+        
         self.samples_list = []
         for view in self.view:
             file_list = self.root_list + view + '.list'
             list_samples = np.loadtxt(file_list, dtype=str)
             for name_sample in list_samples:
                 self.samples_list.append((view, name_sample))
-
+        self.test_list = []
         self.test_list= np.loadtxt(os.path.join(self.root_list, f"{self.test_view}_test.list"), dtype=str)
-        if self.phase == 'test':
-            self.samples_list = self.test_list
+        if self.phase == 'test':    self.samples_list = self.test_list
+        self.num_samples = len(self.samples_list)
+
+        self.sampling = sampling
+        self.clips = nClip
+        self.T = T
+        self.ds = 2
+        self.maskType = maskType
 
 
     def __len__(self):
@@ -81,7 +86,10 @@ class NUCLA_CrossView(Dataset):
 
 
     def get_uniNorm(self, skeleton):
-        'skeleton: T X 25 x 2, norm[0,1], (x-min)/(max-min)'
+        '''skeleton: T X 25 x 2, \\
+            norm[-1,1], \\
+            norm[ 0,1], \\
+            (x-x_min)/(x_max - x_min)'''
         # nonZeroSkeleton = []
         if self.dataType == '2D':  dim = 2
         else:                      dim = 3
@@ -94,9 +102,7 @@ class NUCLA_CrossView(Dataset):
             normPose = np.zeros_like((skeleton[i]))
             for j in range(0, skeleton.shape[1]):
                 point = skeleton[i,j]
-
                 if point[0] !=0 and point[1] !=0:
-
                     nonZeros.append(point)
                     ids.append(j)
 
@@ -108,7 +114,8 @@ class NUCLA_CrossView(Dataset):
             if dim == 3:
                 minZ, maxZ = np.min(nonzeros[:,2]), np.max(nonzeros[:,2])
                 normPose[ids,2] = (nonzeros[:,1] - minZ)/(maxZ-minZ)
-            normSkeleton[i] = normPose
+            normSkeleton[i] = normPose # Yuexi version
+            # normSkeleton[i] = normPose * 2 - 1
             visibility[i,ids] = 1
             bbox[i] = np.asarray([minX, minY, maxX, maxY])
 
@@ -261,7 +268,7 @@ class NUCLA_CrossView(Dataset):
         normSkeleton, binaryMask, bboxes = self.get_uniNorm(skeleton)
         affineSkeletons = self.getAffineTransformation(skeleton)
 
-        if self.maskType == 'binary': visibility = binaryMask
+        if self.maskType == 'binary': visibility = binaryMask  #
         else:                         visibility = confidence  # mask is from confidence score
         
         # Invalid data
@@ -394,7 +401,8 @@ class NUCLA_CrossView(Dataset):
             visibility_input = np.concatenate((visibility_input), 0)
             affineSkeletons_input = np.concatenate((affineSkeletons_input),0)
         skeletonData = {'normSkeleton':inpSkeleton_all, 'unNormSkeleton': skeleton_all,
-                        'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
+                        # 'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input}
+                        'visibility':visibility_input, 'affineSkeletons':affineSkeletons_input,'ids_sample':ids_sample, 'T_sample':T_sample}
         
         return skeletonData
 
@@ -414,7 +422,7 @@ class NUCLA_CrossView(Dataset):
             view, name_sample = self.samples_list[index]
 
         if self.sampling == 'Single':
-            # [T, num_joints, 2]
+            # [1, T, num_joints, 2]
             skeletons = self.get_data(view, name_sample) 
         else:
             # [nClip, T, num_joints, 2]

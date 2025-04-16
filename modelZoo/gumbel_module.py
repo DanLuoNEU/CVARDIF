@@ -78,7 +78,10 @@ class GumbelSigmoid(torch.nn.Module):
         return gumbel_samples_tensor
 
     def gumbel_sigmoid_sample(self, logits, temperature, inference=False):
-        """Adds noise to the logits and takes the sigmoid. No Gumbel noise during inference."""
+        """Adds noise to the logits and takes the sigmoid. No Gumbel noise during inference.
+        RETURN:
+            soft_samples: (0,1)
+        """
         if not inference:
             gumbel_samples_tensor = self.sample_gumbel_like(logits.data)
             gumbel_trick_log_prob_samples = logits + gumbel_samples_tensor.data
@@ -97,6 +100,9 @@ class GumbelSigmoid(torch.nn.Module):
         return out
 
     def forward(self, logits, thresh, force_hard=False, temperature=2 / 3, inference=False):
+        '''
+        force_hard: always True
+        '''
         # inference = not self.training
         inference = inference
         # if self.training and not force_hard:

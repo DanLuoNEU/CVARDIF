@@ -1,0 +1,229 @@
+# DIR-1: train dictionary, N-UCLA dataset
+import os
+import ipdb
+import time
+import numpy as np
+from einops import rearrange
+import random
+import argparse
+import datetime
+# from ptflops import get_model_complexity_info
+from matplotlib import pyplot as plt
+
+import torch
+from torch.utils.data import DataLoader
+from torch.optim import lr_scheduler
+
+# from dataset.crossView_UCLA import NUCLA_CrossView
+from dataset.crossView_UCLA_ske import NUCLA_CrossView
+from modelZoo.networks import BiSC
+from utils import rt2num_clamp, sparsity
+
+seed = 123
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+
+def get_parser():
+    def str2bool(v):
+        if    v.lower() in ('yes', 'true', 't', 'y', '1'):  return True
+        elif  v.lower() in ('no', 'false', 'f', 'n', '0'):  return False
+        else:  raise argparse.ArgumentTypeError('Unsupported value encountered.')
+    
+    parser = argparse.ArgumentParser(description='CVARDIF')
+    parser.add_argument('--modelRoot', default='exps_should_be_saved_on_HDD',
+                        help='the work folder for storing experiment results')
+    parser.add_argument('--path_list', default='./', help='')
+    parser.add_argument('--cus_n', default='', help='customized name')
+    parser.add_argument('--mode', default='dy+bi')
+    parser.add_argument('--wiRH', default='1', type=str2bool, help='Use Reweighted Heuristic Algorithm')
+    parser.add_argument('--wiBI', default='1', type=str2bool, help='Use Binary Code as Input for Classifier')
+    parser.add_argument('--setup', default='setup1', help='')
+    parser.add_argument('--dataType', default='2D', help='')
+    parser.add_argument('--sampling', default='Multi', help='')
+    parser.add_argument('--nClip', default=6, type=int, help='') # sampling=='multi' or sampling!='Single'
+
+    parser.add_argument('--T', default=36, type=int, help='')
+    parser.add_argument('--N', default=80, type=int, help='')
+    parser.add_argument('--lam_f', default=0.1, type=float)
+    parser.add_argument('--r_r', default='0.8,1.1', help='rho range')
+    parser.add_argument('--r_t', default='0,pi', help='theta range')
+    # parser.add_argument('--r_r', default='0.8415,1.0852', help='rho range')
+    # parser.add_argument('--r_t', default='0.1687,3.1052', help='theta range')
+    parser.add_argument('--g_th', default=0.505, type=float) # 0.501/0.503/0.510
+    parser.add_argument('--g_te', default=0.1, type=float)
+
+    parser.add_argument('--gpu_id', default=7, type=int, help='')
+    parser.add_argument('--bs', default=32, type=int, help='')
+    parser.add_argument('--nw', default=8, type=int, help='')
+    parser.add_argument('--Alpha', default=1, type=float, help='bi loss')
+    parser.add_argument('--Alpha_C', default=1e+3, type=float, help='L1_C loss')
+    parser.add_argument('--lam2', default=1e+4, type=float, help='mse loss')
+    parser.add_argument('--lr_2', default=1e-4, type=float)
+    parser.add_argument('--ms', default='20,40', help='milestone for learning rate scheduler')
+    parser.add_argument('--Epoch', default=50, type=int, help='')
+
+    return parser
+
+
+def test(dl, net, epoch):
+    net.eval()
+    with torch.no_grad():
+        lossVal_t = []
+        l1_C_t, l1_C_B_t, l1_B_t, mseC_t, mseB_t = [], [], [], [], []
+        Sp_0, Sp_th = [], []
+        for _, sample in enumerate(dl):
+            # batch_size, num_clips, t, num_joint, dim_joint
+            skeletons = sample['input_skeletons']['normSkeleton'].float().cuda(args.gpu_id)
+            # -> batch_size x num_clips, t, num_joint x dim_joint
+            input_skeletons = rearrange(skeletons, 'n c t j d -> (n c) t (j d)')
+            C, R_C, B, R_B = net(input_skeletons, True)
+            MSE_C = ((R_C - input_skeletons)**2).mean()
+            MSE_B = ((R_B - input_skeletons)**2).mean()
+            ML1_C = C.abs().mean()
+            ML1_B = B.abs().mean()
+            ML1_C_B = (C*B).abs().mean()
+            loss_t = args.lam2 * MSE_C + args.Alpha_C * ML1_C
+
+            lossVal_t.append(loss_t.detach().cpu())
+            l1_C_t.append(ML1_C.detach().cpu())
+            l1_C_B_t.append(ML1_C_B.detach().cpu())
+            mseC_t.append(MSE_C.detach().cpu())
+            l1_B_t.append(ML1_B.detach().cpu())
+            mseB_t.append(MSE_B.detach().cpu())
+            sp_0,sp_th =sparsity(C)
+            Sp_0.append(sp_0.detach().cpu())
+            Sp_th.append(sp_th.detach().cpu())
+        # log
+        # print('Test epoch:', epoch, 
+        #     'loss:', np.mean(np.asarray(lossVal_t)),
+        #     'L1_C:', np.mean(np.asarray(l1_C_t)),
+        #     'L1_C_B:', np.mean(np.asarray(l1_C_B_t)),
+        #     'mseC:', np.mean(np.asarray(mseC_t)),
+        #     'L1_B:', np.mean(np.asarray(l1_B_t)),
+        #     'mseB:', np.mean(np.asarray(mseB_t)),
+        #     f'Sp_0:{np.mean(np.asarray(Sp_0))}', 
+        #     f'Sp_th:{np.mean(np.asarray(Sp_th))}')
+        for ep in range(50+1):
+            print('Test epoch:', ep, 
+                'loss:', np.mean(np.asarray(lossVal_t)),
+                'L1_C:', np.mean(np.asarray(l1_C_t)),
+                'L1_C_B:', np.mean(np.asarray(l1_C_B_t)),
+                'mseC:', np.mean(np.asarray(mseC_t)),
+                'L1_B:', np.mean(np.asarray(l1_B_t)),
+                'mseB:', np.mean(np.asarray(mseB_t)),
+                f'Sp_0:{np.mean(np.asarray(Sp_0))}', 
+                f'Sp_th:{np.mean(np.asarray(Sp_th))}')
+
+
+def main(args):
+    # Log
+    os.system('date')
+    # Configurations
+    args.bs_t = args.bs
+    args.ms = [int(mile) for mile in args.ms.split(',')]
+    # args.Alpha_C = args.lam_f
+    str_conf = f"LossR_C_{'wiRH' if args.wiRH else 'woRH'}_{'wiBI' if args.wiBI else 'woBI'}"
+    args.mode = 'dy+bi' if args.wiBI else 'dy'
+    print(f" {args.mode} | {str_conf} | Batch Size: Train {args.bs} | Test {args.bs_t} | Sample {args.sampling}(nClip-{args.nClip})")
+    print(f"\t lam_f: {args.lam_f} | r_r: {args.r_r} | r_t: {args.r_t} | g_th: {args.g_th} | g_te: {args.g_te}")
+    print(f"\t Alpha_C: {args.Alpha_C} | lam2: {args.lam2} | lr_2: {args.lr_2}(milestone: {args.ms})")
+    ## Network
+    net = BiSC(args).cuda(args.gpu_id)
+    # net.sparseCoding.freezeD = True
+    # Loading CVAR Pretrained
+    args.pretrain = "/home/dan/ws/202209_CrossView/202412-CVAR_CL/pretrained/NUCLA/setup1/Multi/pretrainedRHDYAN_for_CL.pth"
+    print('pretrain:', args.pretrain)
+    stateDict = torch.load(args.pretrain, map_location='cpu')['state_dict']
+    rho, theta = rt2num_clamp(stateDict['backbone.sparseCoding.rr'],stateDict['backbone.sparseCoding.theta'],
+                              net.sparseCoding.rmin, net.sparseCoding.rmax, net.sparseCoding.tmin, net.sparseCoding.tmax)
+    net.sparseCoding.update_D(rho,theta)
+    # # Loading Selected SBAR model
+    # args.pretrain = "/data/Dan/202501_SBAR/3_MSECB-ML1CB_desc/0_250210_clamp_LASSO-Loss/lamf1e-2_gth502_lam2-5e-1_a1e-2_bs32_clamp_lr2-1e-1/NUCLA_CV_setup1_Multi/DIR_D_LossR_B_wiRH_wiBI/dir_d_50.pth"
+    # # args.pretrain = "/data/Dan/202501_SBAR/3_MSECB-ML1CB_desc/1_250210_clamp_Handcrafted-Loss/lamf1e-2_gth502_lam2-1e+2_a1e+1_bs32_clamp_lr2-1e-4/NUCLA_CV_setup1_Multi/DIR_D_LossR_B_wiRH_wiBI/dir_d_50.pth"
+    # print('pretrain:', args.pretrain)
+    # stateDict = torch.load(args.pretrain, map_location='cpu')['state_dict']
+    # net.sparseCoding.update_D(stateDict['sparseCoding.rho'],stateDict['sparseCoding.theta'])
+    
+    # ipdb.set_trace()
+    # Dataset
+    assert args.path_list!='', '!!! NO Dataset Samples LIST !!!'
+    path_list = args.path_list + f"/data/CV/{args.setup}/"
+    # trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
+    #                            setup=args.setup, dataType=args.dataType,
+    #                            sampling=args.sampling, nClip=args.nClip,
+    #                            T=args.T, maskType='None')
+    # trainloader = DataLoader(trainSet, shuffle=True,
+    #                          batch_size=args.bs, num_workers=args.nw)
+    testSet = NUCLA_CrossView(root_list=path_list, phase='test',
+                              setup=args.setup, dataType=args.dataType,
+                              sampling=args.sampling, nClip=args.nClip,
+                              T=args.T, maskType='None')
+    testloader = DataLoader(testSet, shuffle=False,
+                            batch_size=args.bs_t, num_workers=args.nw)
+    # Training Strategy
+    optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), 
+                                lr=args.lr_2, weight_decay=0.001, momentum=0.9)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=args.ms, gamma=0.1)
+    
+    test(testloader,net,0)
+    
+    print('END\n')
+    os.system('date')
+
+def main_gth(args):
+    # Log
+    os.system('date')
+    # Configurations
+    args.bs_t = args.bs
+    args.ms = [int(mile) for mile in args.ms.split(',')]
+    # args.Alpha_C = args.lam_f
+    str_conf = f"LossR_C_{'wiRH' if args.wiRH else 'woRH'}_{'wiBI' if args.wiBI else 'woBI'}"
+    args.mode = 'dy+bi' if args.wiBI else 'dy'
+    print(f" {args.mode} | {str_conf} | Batch Size: Train {args.bs} | Test {args.bs_t} | Sample {args.sampling}(nClip-{args.nClip})")
+    print(f"\t lam_f: {args.lam_f} | r_r: {args.r_r} | r_r: {args.r_t} | g_th: {args.g_th} | g_te: {args.g_te}")
+    print(f"\t Alpha_C: {args.Alpha_C} | lam2: {args.lam2} | lr_2: {args.lr_2}(milestone: {args.ms})")
+    ## Network
+    net = BiSC(args).cuda(args.gpu_id)
+    net.sparseCoding.freezeD = True
+    args.pretrain = "/data/Dan/202501_SBAR/1_L1RC_desc/3_250206_pole_init/lamf1e-2_lam2-1e+4_aC1e+3_bs32_uni_lr2-1e-4/NUCLA_CV_setup1_Multi/DIR_D_LossR_C_wiRH_wiBI/dir_d_50.pth"
+    print('pretrain:', args.pretrain)
+    stateDict = torch.load(args.pretrain, map_location='cpu')['state_dict']
+    net.sparseCoding.update_D(stateDict['sparseCoding.rho'],stateDict['sparseCoding.theta'])
+    # ipdb.set_trace()
+    # Dataset
+    assert args.path_list!='', '!!! NO Dataset Samples LIST !!!'
+    path_list = args.path_list + f"/data/CV/{args.setup}/"
+    trainSet = NUCLA_CrossView(root_list=path_list, phase='train',
+                               setup=args.setup, dataType=args.dataType,
+                               sampling=args.sampling, nClip=args.nClip,
+                               T=args.T, maskType='None')
+    trainloader = DataLoader(trainSet, shuffle=True,
+                             batch_size=args.bs, num_workers=args.nw)
+    testSet = NUCLA_CrossView(root_list=path_list, phase='test',
+                              setup=args.setup, dataType=args.dataType,
+                              sampling=args.sampling, nClip=args.nClip,
+                              T=args.T, maskType='None')
+    testloader = DataLoader(testSet, shuffle=False,
+                            batch_size=args.bs_t, num_workers=args.nw)
+    # Training Strategy
+    optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, net.parameters()), 
+                                lr=args.lr_2, weight_decay=0.001, momentum=0.9)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=args.ms, gamma=0.1)
+    
+    test(trainloader, net, 0)
+    test(testloader, net, 0)
+    list_gth = [0.45, 0.5,0.505,0.510,0.55,0.6,0.7]
+    for g_th in list_gth:
+        net.g_th = g_th
+        test(testloader,net,g_th)
+    
+    
+    os.system('date')
+    print('END\n')
+
+
+if __name__ == "__main__":
+    parser = get_parser()
+    args=parser.parse_args()
+    main(args)

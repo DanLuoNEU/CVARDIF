@@ -8,7 +8,7 @@ import torchvision.transforms as transforms
 
 from utils import gridRing
 from modelZoo.actRGB import getAttentionRGBFeature, RGBAction
-from modelZoo.sparseCoding import DyanEncoder,np
+from modelZoo.sparseCoding import DyanEncoder,np,ipdb
 from modelZoo.gumbel_module import GumbelSigmoid
 
 class GroupNorm(nn.Module):
@@ -123,33 +123,49 @@ class binaryCoding(nn.Module):
 class binarizeSparseCode(nn.Module):
     def __init__(self, Drr, Dtheta, T, wiRH,
                  gpu_id,
-                 g_th, g_te, Inference=True,
+                 wiBI, g_th, g_te, Inference=True,
                  fistaLam=0.1):
         super(binarizeSparseCode, self).__init__()
         self.Drr = Drr
         self.Dtheta = Dtheta
-        self.g_th = g_th
-        self.g_te = g_te
-        self.Inference = Inference
+        self.wiBI = wiBI
         self.gpu_id = gpu_id
         self.fistaLam = fistaLam
         self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, T, wiRH,
                                         lam=fistaLam,
                                         gpu_id=self.gpu_id)
-        self.BinaryCoding = GumbelSigmoid()
+        if self.wiBI:
+            self.g_th = g_th
+            self.g_te = g_te
+            self.BinaryCoding = GumbelSigmoid()
 
+    def tensor_hook1(self, grad):
+        print(f"Gradient of C: {grad}")
+
+    def tensor_hook2(self, grad):
+        print(f"Gradient of D: {grad}")
+    
+    def tensor_hook3(self, grad):
+        print(f"Gradient of B: {grad}")
 
     def forward(self, x, inference=True):
         # DYAN encoding
-        sparseCode, Dict, _ = self.sparseCoding(x)
-        R = torch.matmul(Dict, sparseCode)
-        # Gumbel
-        binaryCode = self.BinaryCoding(sparseCode**2, self.g_th, temperature=self.g_te,
-                                       force_hard=True, inference=inference)
-        temp = sparseCode*binaryCode
-        R_B = torch.matmul(Dict, temp)
-        
-        return binaryCode, R, sparseCode, R_B
+        C, D, _ = self.sparseCoding(x)
+        # C.register_hook(self.tensor_hook1)
+        # D.register_hook(self.tensor_hook2)
+        R = D@C
+        # ipdb.set_trace()
+        if self.wiBI:
+            # Gumbel    
+            B = self.BinaryCoding(C**2, self.g_th, temperature=self.g_te,
+                                  force_hard=True, inference=inference)
+        else:
+            B = torch.zeros_like(C).to(C)
+        # B.register_hook(self.tensor_hook3)
+        C_B = C*B
+        R_B = D@C_B
+
+        return C, R, B, R_B
 
 
 class classificationGlobal(nn.Module):
@@ -385,7 +401,8 @@ class classificationWBinarizationRGBDY(nn.Module):
 
 class Fullclassification(nn.Module):
     def __init__(self, Drr, Dtheta, T, wiRH,
-                 fistaLam, g_th, g_te,
+                 fistaLam, 
+                 wiBI, g_th, g_te,
                  gpu_id,
                  num_class, Npole,
                  dataType, useCL, 
@@ -396,8 +413,7 @@ class Fullclassification(nn.Module):
         self.Dtheta = Dtheta
         self.T = T
         self.fistaLam = fistaLam
-        self.g_th = g_th
-        self.g_te = g_te
+        self.wiBI = wiBI
         self.gpu_id = gpu_id
         # Gumbel
         # self.bi_thresh = 0.505
@@ -410,8 +426,11 @@ class Fullclassification(nn.Module):
         self.sparseCoding = DyanEncoder(self.Drr, self.Dtheta, T, wiRH,
                                         lam=fistaLam, gpu_id=self.gpu_id,
                                         freezeD=True)
-        self.Inference = Inference
-        self.BinaryCoding = GumbelSigmoid()
+        if self.wiBI:
+            self.g_th = g_th
+            self.g_te = g_te
+            self.Inference = Inference
+            self.BinaryCoding = GumbelSigmoid()
         self.Classifier = classificationGlobal(num_class=self.num_class,
                                                Npole=self.Npole,
                                                dataType=self.dataType,
@@ -419,16 +438,20 @@ class Fullclassification(nn.Module):
 
     def forward(self, x):
         # DYAN
-        sparseCode, Dict, R_C = self.sparseCoding(x) # w.RH
-        # Gumbel
-        binaryCode = self.BinaryCoding(sparseCode**2, self.g_th, temperature=self.g_te,
-                                       force_hard=True, inference=self.Inference)
-        # Classifier
-        label, lastFeat = self.Classifier(binaryCode)
-        temp1 = sparseCode * binaryCode
-        R_B = torch.matmul(Dict, temp1)
+        C, D, R_C = self.sparseCoding(x) # w.RH
+        if self.wiBI:
+            # Gumbel
+            B = self.BinaryCoding(C**2, self.g_th, temperature=self.g_te,
+                                        force_hard=True, inference=self.Inference)
+            # Classifier
+            label, lastFeat = self.Classifier(B)
+        else:
+            B = torch.zeros_like(C).to(C)
+            label, lastFeat = self.Classifier(C)
+        C_B = C * B
+        R_B = torch.matmul(D, C_B)
 
-        return label, lastFeat, binaryCode, R_C, R_B
+        return label, lastFeat, C, R_C, B, R_B
 
 
 class fusionLayers(nn.Module):

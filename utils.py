@@ -1,4 +1,5 @@
 import os
+import ipdb
 import math
 import random
 import numpy as np
@@ -12,6 +13,7 @@ random.seed(0)
 torch.manual_seed(0)
 np.random.seed(0)
 
+
 def spectral_norm_svd(A):
     """
     Compute the spectral norm of a matrix using SVD.
@@ -23,11 +25,105 @@ def spectral_norm_svd(A):
     # The largest singular value is the spectral norm
     return S.max()
 
+
 # PyTorch 1.6.0
 def sparsity(n, thr_zero=0.05):
     m = n.clone().detach()
-    return 1.0-torch.tensor(m!=0).sum().float()/torch.tensor(m.numel()).float(), \
-           1.0-torch.tensor(torch.abs(m).ge(thr_zero)).sum().float()/torch.tensor(m.numel()).float()
+    return (m==0.0).sum().float()/torch.tensor(m.numel(), dtype=torch.float), \
+           (m.abs().le(thr_zero)).sum().float()/torch.tensor(m.numel(), dtype=torch.float)
+
+
+def num2rt(rho_rep, theta_rep,
+           rmin=0.001, rmax=1.1,
+           tmin=0., tmax=torch.pi):
+           # rmin=0.8415, rmax=1.0852
+           # tmin=0.1687, tmax=3.1052):
+    """ Reparameterize rho and theta in a range
+    INPUT:
+        rho_rep:   torch.tensor(float), (N), range [-inf, inf]
+        theta_rep: torch.tensor(float), (N), range [-inf, inf]
+    RETURN:
+        rho:   torch.tensor(float), (N), range: (rmin, rmax)
+        theta: torch.tensor(float), (N), range: (tmin, tmax)
+    NOTE:
+        Option 1. General range
+            rmin, rmax = 0.001, 1.1
+            tmin, tmax = 0., torch.pi
+        Option 2. Empirical from CVAR
+            rmin, rmax = 0.8415, 1.0852
+            tmin, tmax = 0.1687, 3.1052
+    """
+    # sigmoid
+    rho = rmin + (rmax-rmin) * torch.sigmoid(rho_rep)
+    theta = tmin + (tmax-tmin) * torch.sigmoid(theta_rep)
+    # clamp
+    rho = torch.clamp(rho, rmin, rmax)
+    theta = torch.clamp(theta,tmin, tmax)
+
+    return rho, theta
+    
+
+def rt2num(rho, theta,
+           rmin=0.001, rmax=1.1,
+           tmin=0., tmax=torch.pi):
+           # rmin=0.8415, rmax=1.0852
+           # tmin=0.1687, tmax=3.1052):
+    """ Inversed reparameterization
+    INPUT:
+        rho:   torch.tensor(float), (N), range: (rmin, rmax)
+        theta: torch.tensor(float), (N), range: (tmin, tmax)
+    RETURN:
+        rho_rep:   torch.tensor(float), (N), range: [-inf, inf]
+        theta_rep: torch.tensor(float), (N), range: [-inf, inf]
+    """
+    rho_rep = (rho-rmin)/(rmax-rmin)
+    theta_rep = (theta-tmin)/(tmax-tmin)
+    # Avoid log(0) issues
+    eps = 1e-6
+    rho_rep = torch.clamp(rho_rep, eps, 1-eps)
+    theta_rep = torch.clamp(theta_rep, eps, 1-eps)
+
+    return torch.log(rho_rep/(1-rho_rep)), torch.log(theta_rep/(1-theta_rep))
+
+
+def num2rt_clamp(rho_rep, theta_rep,
+           rmin=0.001, rmax=1.1,
+           tmin=0., tmax=torch.pi):
+           # rmin=0.8415, rmax=1.0852
+           # tmin=0.1687, tmax=3.1052):
+    """ Reparameterize rho and theta in a range
+    INPUT:
+        rho_rep:   torch.tensor(float), (N), range [-inf, inf]
+        theta_rep: torch.tensor(float), (N), range [-inf, inf]
+    RETURN:
+        rho:   torch.tensor(float), (N), range: (rmin, rmax)
+        theta: torch.tensor(float), (N), range: (tmin, tmax)
+    """
+    # clamp
+    rho = rmin + (rmax-rmin) * torch.clamp(rho_rep, 0, 1)
+    theta = tmin + (tmax-tmin) * torch.clamp(theta_rep, 0, 1)
+
+    return rho, theta
+    
+
+def rt2num_clamp(rho, theta,
+           rmin=0.001, rmax=1.1,
+           tmin=0., tmax=torch.pi):
+           # rmin=0.8415, rmax=1.0852
+           # tmin=0.1687, tmax=3.1052):
+    """ Inversed reparameterization
+    INPUT:
+        rho:   torch.tensor(float), (N), range: (rmin, rmax)
+        theta: torch.tensor(float), (N), range: (tmin, tmax)
+    RETURN:
+        rho_rep:   torch.tensor(float), (N), range: [-inf, inf]
+        theta_rep: torch.tensor(float), (N), range: [-inf, inf]
+    """
+    rho_rep = (rho-rmin)/(rmax-rmin)
+    theta_rep = (theta-tmin)/(tmax-tmin)
+
+    return rho_rep, theta_rep
+
 
 def weightPoles(c_array, Drr, Dtheta, dictionary):
     c_array = c_array.cpu().numpy()
@@ -97,10 +193,15 @@ def gridRing(N):
     # rmax = (1 + epsilon_high)
 
     # epsilon_low = 0.25
-    epsilon_low = 0.15
+    epsilon_low = 0.25 # 0.15
     epsilon_high = 0.15
-    rmin = (1 - epsilon_low)
-    rmax = (1 + epsilon_high)
+    # rmin = (1 - epsilon_low)
+    # rmax = (1 + epsilon_high)
+    # rmin = (0.84 - epsilon_low)
+    # rmax = (0.84 + epsilon_high)
+
+    rmin = (0.90 - epsilon_low)
+    rmax = (0.90 + epsilon_high)
 
     thetaMin = 0.001
     thetaMax = np.pi - 0.001
@@ -120,12 +221,15 @@ def gridRing(N):
 
 ## Generate the grid on poles
 def generateGridPoles(delta, rmin, rmax, thetaMin, thetaMax):
+    # ipdb.set_trace()
     rmin2 = pow(rmin, 2)
     rmax2 = pow(rmax, 2)
     xv = np.arange(-rmax, rmax, delta)
     x, y = np.meshgrid(xv, xv, sparse=False)
-    mask = np.logical_and(np.logical_and(x ** 2 + y ** 2 >= rmin2, x ** 2 + y ** 2 <= rmax2),
-                          np.logical_and(np.angle(x + 1j * y) >= thetaMin, np.angle(x + 1j * y) <= thetaMax))
+    mask = np.logical_and(np.logical_and(x ** 2 + y ** 2 >= rmin2,
+                                         x ** 2 + y ** 2 <= rmax2),
+                          np.logical_and(np.angle(x + 1j * y) >= thetaMin,
+                                         np.angle(x + 1j * y) <= thetaMax))
     px = x[mask]
     py = y[mask]
     P = px + 1j * py

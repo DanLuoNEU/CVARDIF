@@ -7,10 +7,9 @@ from dataset.crossView_UCLA import np, torch, NUCLA_CrossView
 from modelZoo.BinaryCoding import gridRing, twoStreamClassification, contrastiveNet
 from utils import gridRing
 
-def testing(dataloader, net,
-            gpu_id, sampling, mode, 
-            withMask,
-            keep_index):
+def testing(dataloader,
+            net,
+            gpu_id):
     count = 0
     pred_cnt = 0
 
@@ -22,12 +21,9 @@ def testing(dataloader, net,
 
             Nsample, nClip, t = skeletons.shape[0], skeletons.shape[1], skeletons.shape[2]
             input_skeletons =rearrange(skeletons, 'b c t n d -> (b c) t (n d)')
-            if mode == 'dy+bi+cl':
-                # input_skeletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
-                actPred, _,biCode, _,_ = net(input_skeletons)
-            else:
-                # actPred, _ , _= net(input_skeletons, t)
-                actPred, _,_ = net.forward2(input_skeletons, t, keep_index)
+
+            # input_skeletons = skeletons.reshape(skeletons.shape[0]*skeletons.shape[1], t, -1)
+            actPred, _, _, _, _, _ = net(input_skeletons)
 
             actPred = actPred.reshape(Nsample, nClip, actPred.shape[-1])
             actPred = torch.mean(actPred, 1)

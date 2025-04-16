@@ -1,0 +1,10 @@
+.vscode/
+**/__pycache__/
+__pycache__/
+scripts.log
+pretrained/
+notes_exp/
+figures/torch_graphs
+notes_exp/
+tb_logs/
+recycle/
